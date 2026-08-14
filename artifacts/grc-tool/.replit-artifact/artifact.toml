@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/"
+title = "Compliance OS"
+description = "A multi-entity GRC (Governance, Risk, and Compliance) platform for managing PCI DSS, SOC 2, GDPR, CCPA, and NYDFS compliance across three business entities: Gopuff, BevMo!, and Liquor Barn. Features include a readiness dashboard, evidence request tracking, policy repository, AOC management, controls library, vendor tracking, and full activity logging."
+version = "1.0.0"
+id = "artifacts/grc-tool"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 21145
+
+[services.development]
+run = "pnpm --filter @workspace/grc-tool run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/grc-tool", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/grc-tool/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "21145"
+BASE_PATH = "/"

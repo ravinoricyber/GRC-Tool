@@ -3,20 +3,40 @@ info:
   # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: Compliance OS — GRC tool API
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: entities
+    description: Business entities
+  - name: frameworks
+    description: Compliance frameworks
+  - name: controls
+    description: Controls library
+  - name: evidence
+    description: Evidence requests
+  - name: policies
+    description: Policy repository
+  - name: aocs
+    description: Attestations of compliance
+  - name: assessments
+    description: Assessment engagements
+  - name: vendors
+    description: Third-party vendors
+  - name: activity
+    description: Activity log
+  - name: dashboard
+    description: Dashboard & analytics
+
 paths:
   /healthz:
     get:
       operationId: healthCheck
       tags: [health]
       summary: Health check
-      description: Returns server health status
       responses:
         "200":
           description: Healthy
@@ -24,6 +44,807 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  # ─── ENTITIES ───────────────────────────────────────────────────────────────
+  /entities:
+    get:
+      operationId: listEntities
+      tags: [entities]
+      summary: List all business entities
+      responses:
+        "200":
+          description: List of entities
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Entity"
+
+  /entities/{code}:
+    get:
+      operationId: getEntity
+      tags: [entities]
+      summary: Get a single entity
+      parameters:
+        - name: code
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Entity
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Entity"
+        "404":
+          description: Not found
+
+  # ─── FRAMEWORKS ─────────────────────────────────────────────────────────────
+  /frameworks:
+    get:
+      operationId: listFrameworks
+      tags: [frameworks]
+      summary: List compliance frameworks
+      responses:
+        "200":
+          description: Frameworks
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Framework"
+    post:
+      operationId: createFramework
+      tags: [frameworks]
+      summary: Create a framework
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FrameworkInput"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Framework"
+
+  /frameworks/{id}:
+    get:
+      operationId: getFramework
+      tags: [frameworks]
+      summary: Get a framework
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Framework
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Framework"
+        "404":
+          description: Not found
+    patch:
+      operationId: updateFramework
+      tags: [frameworks]
+      summary: Update a framework
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FrameworkUpdate"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Framework"
+
+  # ─── CONTROLS ───────────────────────────────────────────────────────────────
+  /controls:
+    get:
+      operationId: listControls
+      tags: [controls]
+      summary: List controls
+      parameters:
+        - name: frameworkId
+          in: query
+          schema:
+            type: ["string", "null"]
+        - name: entityCode
+          in: query
+          schema:
+            type: ["string", "null"]
+        - name: status
+          in: query
+          schema:
+            type: ["string", "null"]
+        - name: limit
+          in: query
+          schema:
+            type: ["number", "null"]
+        - name: offset
+          in: query
+          schema:
+            type: ["number", "null"]
+      responses:
+        "200":
+          description: Controls list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Control"
+
+  /controls/{id}:
+    get:
+      operationId: getControl
+      tags: [controls]
+      summary: Get a control
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Control
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Control"
+        "404":
+          description: Not found
+    patch:
+      operationId: updateControl
+      tags: [controls]
+      summary: Update control state
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ControlUpdate"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Control"
+
+  # ─── EVIDENCE ───────────────────────────────────────────────────────────────
+  /evidence:
+    get:
+      operationId: listEvidence
+      tags: [evidence]
+      summary: List evidence requests
+      parameters:
+        - name: entityCode
+          in: query
+          schema:
+            type: ["string", "null"]
+        - name: status
+          in: query
+          schema:
+            type: ["string", "null"]
+        - name: priority
+          in: query
+          schema:
+            type: ["string", "null"]
+        - name: frameworkId
+          in: query
+          schema:
+            type: ["string", "null"]
+        - name: limit
+          in: query
+          schema:
+            type: ["number", "null"]
+        - name: offset
+          in: query
+          schema:
+            type: ["number", "null"]
+      responses:
+        "200":
+          description: Evidence requests
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/EvidenceRequest"
+    post:
+      operationId: createEvidence
+      tags: [evidence]
+      summary: Create evidence request
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EvidenceInput"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EvidenceRequest"
+
+  /evidence/{id}:
+    get:
+      operationId: getEvidence
+      tags: [evidence]
+      summary: Get an evidence request
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Evidence request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EvidenceRequest"
+        "404":
+          description: Not found
+    patch:
+      operationId: updateEvidence
+      tags: [evidence]
+      summary: Update evidence request
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EvidenceUpdate"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EvidenceRequest"
+    delete:
+      operationId: deleteEvidence
+      tags: [evidence]
+      summary: Delete evidence request
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Deleted
+
+  # ─── POLICIES ───────────────────────────────────────────────────────────────
+  /policies:
+    get:
+      operationId: listPolicies
+      tags: [policies]
+      summary: List policies
+      parameters:
+        - name: entityCode
+          in: query
+          schema:
+            type: ["string", "null"]
+        - name: frameworkId
+          in: query
+          schema:
+            type: ["string", "null"]
+        - name: status
+          in: query
+          schema:
+            type: ["string", "null"]
+      responses:
+        "200":
+          description: Policies
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Policy"
+    post:
+      operationId: createPolicy
+      tags: [policies]
+      summary: Create a policy
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PolicyInput"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Policy"
+
+  /policies/{id}:
+    get:
+      operationId: getPolicy
+      tags: [policies]
+      summary: Get a policy
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Policy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Policy"
+        "404":
+          description: Not found
+    patch:
+      operationId: updatePolicy
+      tags: [policies]
+      summary: Update a policy
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PolicyUpdate"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Policy"
+    delete:
+      operationId: deletePolicy
+      tags: [policies]
+      summary: Delete a policy
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Deleted
+
+  # ─── AOCs ───────────────────────────────────────────────────────────────────
+  /aocs:
+    get:
+      operationId: listAocs
+      tags: [aocs]
+      summary: List AOCs & audit reports
+      parameters:
+        - name: entityCode
+          in: query
+          schema:
+            type: ["string", "null"]
+        - name: frameworkId
+          in: query
+          schema:
+            type: ["string", "null"]
+      responses:
+        "200":
+          description: AOCs
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Aoc"
+    post:
+      operationId: createAoc
+      tags: [aocs]
+      summary: Upload an AOC
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AocInput"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Aoc"
+
+  /aocs/{id}:
+    get:
+      operationId: getAoc
+      tags: [aocs]
+      summary: Get an AOC
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: AOC
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Aoc"
+        "404":
+          description: Not found
+    patch:
+      operationId: updateAoc
+      tags: [aocs]
+      summary: Update an AOC
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AocUpdate"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Aoc"
+
+  # ─── ASSESSMENTS ────────────────────────────────────────────────────────────
+  /assessments:
+    get:
+      operationId: listAssessments
+      tags: [assessments]
+      summary: List assessments
+      parameters:
+        - name: entityCode
+          in: query
+          schema:
+            type: ["string", "null"]
+        - name: frameworkId
+          in: query
+          schema:
+            type: ["string", "null"]
+        - name: status
+          in: query
+          schema:
+            type: ["string", "null"]
+      responses:
+        "200":
+          description: Assessments
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Assessment"
+    post:
+      operationId: createAssessment
+      tags: [assessments]
+      summary: Create an assessment
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AssessmentInput"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Assessment"
+
+  /assessments/{id}:
+    get:
+      operationId: getAssessment
+      tags: [assessments]
+      summary: Get an assessment
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Assessment
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Assessment"
+        "404":
+          description: Not found
+    patch:
+      operationId: updateAssessment
+      tags: [assessments]
+      summary: Update an assessment
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AssessmentUpdate"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Assessment"
+
+  # ─── VENDORS ────────────────────────────────────────────────────────────────
+  /vendors:
+    get:
+      operationId: listVendors
+      tags: [vendors]
+      summary: List third-party vendors / TPSPs
+      parameters:
+        - name: entityCode
+          in: query
+          schema:
+            type: ["string", "null"]
+        - name: riskLevel
+          in: query
+          schema:
+            type: ["string", "null"]
+      responses:
+        "200":
+          description: Vendors
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Vendor"
+    post:
+      operationId: createVendor
+      tags: [vendors]
+      summary: Create a vendor
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VendorInput"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Vendor"
+
+  /vendors/{id}:
+    get:
+      operationId: getVendor
+      tags: [vendors]
+      summary: Get a vendor
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Vendor
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Vendor"
+        "404":
+          description: Not found
+    patch:
+      operationId: updateVendor
+      tags: [vendors]
+      summary: Update a vendor
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VendorUpdate"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Vendor"
+    delete:
+      operationId: deleteVendor
+      tags: [vendors]
+      summary: Delete a vendor
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Deleted
+
+  # ─── ACTIVITY ───────────────────────────────────────────────────────────────
+  /activity:
+    get:
+      operationId: listActivity
+      tags: [activity]
+      summary: List activity log entries
+      parameters:
+        - name: entityCode
+          in: query
+          schema:
+            type: ["string", "null"]
+        - name: limit
+          in: query
+          schema:
+            type: ["number", "null"]
+        - name: offset
+          in: query
+          schema:
+            type: ["number", "null"]
+      responses:
+        "200":
+          description: Activity log
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ActivityEntry"
+
+  # ─── DASHBOARD ──────────────────────────────────────────────────────────────
+  /dashboard/summary:
+    get:
+      operationId: getDashboardSummary
+      tags: [dashboard]
+      summary: Get dashboard summary stats for an entity
+      parameters:
+        - name: entityCode
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Dashboard summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardSummary"
+
+  /dashboard/evidence-by-status:
+    get:
+      operationId: getEvidenceByStatus
+      tags: [dashboard]
+      summary: Evidence requests grouped by status
+      parameters:
+        - name: entityCode
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Evidence by status breakdown
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/StatusCount"
+
+  /dashboard/control-coverage:
+    get:
+      operationId: getControlCoverage
+      tags: [dashboard]
+      summary: Control coverage by PCI DSS requirement
+      parameters:
+        - name: entityCode
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Control coverage breakdown
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/RequirementCoverage"
+
+  /dashboard/upcoming-milestones:
+    get:
+      operationId: getUpcomingMilestones
+      tags: [dashboard]
+      summary: Upcoming compliance milestones
+      parameters:
+        - name: entityCode
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Upcoming milestones
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Milestone"
+
 components:
   schemas:
     HealthStatus:
@@ -34,3 +855,736 @@ components:
       required:
         - status
 
+    # ─── Entity ─────────────────────────────────────────────────────────────
+    Entity:
+      type: object
+      required: [code, name, legalName, merchantLevel, saqType, cdeScope, isActive, createdAt]
+      properties:
+        code:
+          type: string
+        name:
+          type: string
+        legalName:
+          type: string
+        merchantLevel:
+          type: ["string", "null"]
+        saqType:
+          type: ["string", "null"]
+        cdeScope:
+          type: ["string", "null"]
+        lastAocDate:
+          type: ["string", "null"]
+        nextAocDate:
+          type: ["string", "null"]
+        qsaCompany:
+          type: ["string", "null"]
+        isActive:
+          type: boolean
+        createdAt:
+          type: string
+
+    # ─── Framework ──────────────────────────────────────────────────────────
+    Framework:
+      type: object
+      required: [id, code, name, version, priority, status, summary, domainsCount, nextMilestone, createdAt]
+      properties:
+        id:
+          type: string
+        code:
+          type: string
+        name:
+          type: string
+        version:
+          type: string
+        priority:
+          type: string
+          enum: [critical, high, medium, low]
+        status:
+          type: string
+          enum: [active, monitored, retired]
+        summary:
+          type: string
+        domainsCount:
+          type: number
+        nextMilestone:
+          type: ["string", "null"]
+        owner:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+
+    FrameworkInput:
+      type: object
+      required: [code, name, version, priority, status, summary, domainsCount]
+      properties:
+        code:
+          type: string
+        name:
+          type: string
+        version:
+          type: string
+        priority:
+          type: string
+          enum: [critical, high, medium, low]
+        status:
+          type: string
+          enum: [active, monitored, retired]
+        summary:
+          type: string
+        domainsCount:
+          type: number
+        nextMilestone:
+          type: string
+        owner:
+          type: string
+
+    FrameworkUpdate:
+      type: object
+      properties:
+        name:
+          type: string
+        version:
+          type: string
+        priority:
+          type: string
+          enum: [critical, high, medium, low]
+        status:
+          type: string
+          enum: [active, monitored, retired]
+        summary:
+          type: string
+        domainsCount:
+          type: number
+        nextMilestone:
+          type: string
+        owner:
+          type: string
+
+    # ─── Control ────────────────────────────────────────────────────────────
+    Control:
+      type: object
+      required: [id, frameworkId, frameworkCode, ref, title, domain, domainNumber, createdAt]
+      properties:
+        id:
+          type: string
+        frameworkId:
+          type: string
+        frameworkCode:
+          type: string
+        ref:
+          type: string
+        title:
+          type: string
+        description:
+          type: ["string", "null"]
+        domain:
+          type: string
+        domainNumber:
+          type: number
+        entityCode:
+          type: ["string", "null"]
+        finding:
+          type: ["string", "null"]
+          enum: [in-place, not-applicable, not-tested, not-in-place, null]
+        notes:
+          type: ["string", "null"]
+        lastTestedAt:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+
+    ControlUpdate:
+      type: object
+      properties:
+        finding:
+          type: string
+          enum: [in-place, not-applicable, not-tested, not-in-place]
+        notes:
+          type: string
+        entityCode:
+          type: string
+
+    # ─── Evidence ───────────────────────────────────────────────────────────
+    EvidenceRequest:
+      type: object
+      required: [id, code, entityCode, controlRef, frameworkCode, title, status, priority, requestedAt, createdAt]
+      properties:
+        id:
+          type: string
+        code:
+          type: string
+        assessmentId:
+          type: ["string", "null"]
+        controlId:
+          type: ["string", "null"]
+        controlRef:
+          type: string
+        controlName:
+          type: ["string", "null"]
+        frameworkCode:
+          type: string
+        frameworkName:
+          type: ["string", "null"]
+        entityCode:
+          type: string
+        title:
+          type: string
+        description:
+          type: ["string", "null"]
+        status:
+          type: string
+          enum: [requested, in-progress, submitted, approved, rejected]
+        priority:
+          type: string
+          enum: [critical, high, medium, low]
+        assignee:
+          type: ["string", "null"]
+        requestedBy:
+          type: ["string", "null"]
+        dueDate:
+          type: ["string", "null"]
+        requestedAt:
+          type: string
+        approvedAt:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+
+    EvidenceInput:
+      type: object
+      required: [entityCode, controlRef, frameworkCode, title, priority]
+      properties:
+        entityCode:
+          type: string
+        controlId:
+          type: string
+        controlRef:
+          type: string
+        frameworkCode:
+          type: string
+        title:
+          type: string
+        description:
+          type: string
+        priority:
+          type: string
+          enum: [critical, high, medium, low]
+        assignee:
+          type: string
+        requestedBy:
+          type: string
+        dueDate:
+          type: string
+        assessmentId:
+          type: string
+
+    EvidenceUpdate:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [requested, in-progress, submitted, approved, rejected]
+        priority:
+          type: string
+          enum: [critical, high, medium, low]
+        assignee:
+          type: string
+        dueDate:
+          type: string
+        description:
+          type: string
+        title:
+          type: string
+
+    # ─── Policy ─────────────────────────────────────────────────────────────
+    Policy:
+      type: object
+      required: [id, code, name, owner, version, status, createdAt]
+      properties:
+        id:
+          type: string
+        code:
+          type: string
+        name:
+          type: string
+        owner:
+          type: string
+        version:
+          type: string
+        status:
+          type: string
+          enum: [draft, current, review-due, overdue, retired]
+        effectiveDate:
+          type: ["string", "null"]
+        reviewDate:
+          type: ["string", "null"]
+        pages:
+          type: ["number", "null"]
+        frameworks:
+          type: array
+          items:
+            type: string
+        entities:
+          type: array
+          items:
+            type: string
+        description:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+
+    PolicyInput:
+      type: object
+      required: [code, name, owner, version, status]
+      properties:
+        code:
+          type: string
+        name:
+          type: string
+        owner:
+          type: string
+        version:
+          type: string
+        status:
+          type: string
+          enum: [draft, current, review-due, overdue, retired]
+        effectiveDate:
+          type: string
+        reviewDate:
+          type: string
+        pages:
+          type: number
+        frameworks:
+          type: array
+          items:
+            type: string
+        entities:
+          type: array
+          items:
+            type: string
+        description:
+          type: string
+
+    PolicyUpdate:
+      type: object
+      properties:
+        name:
+          type: string
+        owner:
+          type: string
+        version:
+          type: string
+        status:
+          type: string
+          enum: [draft, current, review-due, overdue, retired]
+        effectiveDate:
+          type: string
+        reviewDate:
+          type: string
+        pages:
+          type: number
+        frameworks:
+          type: array
+          items:
+            type: string
+        entities:
+          type: array
+          items:
+            type: string
+        description:
+          type: string
+
+    # ─── AOC ────────────────────────────────────────────────────────────────
+    Aoc:
+      type: object
+      required: [id, entityCode, frameworkCode, title, status, createdAt]
+      properties:
+        id:
+          type: string
+        entityCode:
+          type: string
+        frameworkCode:
+          type: string
+        frameworkName:
+          type: ["string", "null"]
+        title:
+          type: string
+        status:
+          type: string
+          enum: [current, superseded, draft]
+        qsaCompany:
+          type: ["string", "null"]
+        qsaLead:
+          type: ["string", "null"]
+        issuedDate:
+          type: ["string", "null"]
+        expiresDate:
+          type: ["string", "null"]
+        period:
+          type: ["string", "null"]
+        result:
+          type: ["string", "null"]
+        controlsCovered:
+          type: ["number", "null"]
+        findings:
+          type: ["number", "null"]
+        filename:
+          type: ["string", "null"]
+        filePath:
+          type: ["string", "null"]
+        notes:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+
+    AocInput:
+      type: object
+      required: [entityCode, frameworkCode, title, status]
+      properties:
+        entityCode:
+          type: string
+        frameworkCode:
+          type: string
+        title:
+          type: string
+        status:
+          type: string
+          enum: [current, superseded, draft]
+        qsaCompany:
+          type: string
+        qsaLead:
+          type: string
+        issuedDate:
+          type: string
+        expiresDate:
+          type: string
+        period:
+          type: string
+        result:
+          type: string
+        controlsCovered:
+          type: number
+        findings:
+          type: number
+        filename:
+          type: string
+        filePath:
+          type: string
+        notes:
+          type: string
+
+    AocUpdate:
+      type: object
+      properties:
+        title:
+          type: string
+        status:
+          type: string
+          enum: [current, superseded, draft]
+        qsaCompany:
+          type: string
+        qsaLead:
+          type: string
+        issuedDate:
+          type: string
+        expiresDate:
+          type: string
+        period:
+          type: string
+        result:
+          type: string
+        controlsCovered:
+          type: number
+        findings:
+          type: number
+        filename:
+          type: string
+        filePath:
+          type: string
+        notes:
+          type: string
+
+    # ─── Assessment ─────────────────────────────────────────────────────────
+    Assessment:
+      type: object
+      required: [id, entityCode, frameworkId, frameworkCode, name, status, createdAt]
+      properties:
+        id:
+          type: string
+        entityCode:
+          type: string
+        frameworkId:
+          type: string
+        frameworkCode:
+          type: string
+        frameworkName:
+          type: ["string", "null"]
+        name:
+          type: string
+        qsaCompany:
+          type: ["string", "null"]
+        leadAssessor:
+          type: ["string", "null"]
+        plannedStart:
+          type: ["string", "null"]
+        plannedEnd:
+          type: ["string", "null"]
+        actualStart:
+          type: ["string", "null"]
+        actualEnd:
+          type: ["string", "null"]
+        status:
+          type: string
+          enum: [planning, fieldwork, reporting, closed]
+        createdAt:
+          type: string
+
+    AssessmentInput:
+      type: object
+      required: [entityCode, frameworkId, name]
+      properties:
+        entityCode:
+          type: string
+        frameworkId:
+          type: string
+        name:
+          type: string
+        qsaCompany:
+          type: string
+        leadAssessor:
+          type: string
+        plannedStart:
+          type: string
+        plannedEnd:
+          type: string
+        status:
+          type: string
+          enum: [planning, fieldwork, reporting, closed]
+
+    AssessmentUpdate:
+      type: object
+      properties:
+        name:
+          type: string
+        qsaCompany:
+          type: string
+        leadAssessor:
+          type: string
+        plannedStart:
+          type: string
+        plannedEnd:
+          type: string
+        actualStart:
+          type: string
+        actualEnd:
+          type: string
+        status:
+          type: string
+          enum: [planning, fieldwork, reporting, closed]
+
+    # ─── Vendor ─────────────────────────────────────────────────────────────
+    Vendor:
+      type: object
+      required: [id, name, serviceType, riskLevel, createdAt]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        serviceType:
+          type: string
+        description:
+          type: ["string", "null"]
+        riskLevel:
+          type: string
+          enum: [critical, high, medium, low]
+        status:
+          type: string
+          enum: [active, inactive, under-review]
+        entities:
+          type: array
+          items:
+            type: string
+        contactName:
+          type: ["string", "null"]
+        contactEmail:
+          type: ["string", "null"]
+        lastReviewDate:
+          type: ["string", "null"]
+        nextReviewDate:
+          type: ["string", "null"]
+        hasPciCertification:
+          type: boolean
+        certificationExpiry:
+          type: ["string", "null"]
+        notes:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+
+    VendorInput:
+      type: object
+      required: [name, serviceType, riskLevel]
+      properties:
+        name:
+          type: string
+        serviceType:
+          type: string
+        description:
+          type: string
+        riskLevel:
+          type: string
+          enum: [critical, high, medium, low]
+        status:
+          type: string
+          enum: [active, inactive, under-review]
+        entities:
+          type: array
+          items:
+            type: string
+        contactName:
+          type: string
+        contactEmail:
+          type: string
+        lastReviewDate:
+          type: string
+        nextReviewDate:
+          type: string
+        hasPciCertification:
+          type: boolean
+        certificationExpiry:
+          type: string
+        notes:
+          type: string
+
+    VendorUpdate:
+      type: object
+      properties:
+        name:
+          type: string
+        serviceType:
+          type: string
+        description:
+          type: string
+        riskLevel:
+          type: string
+          enum: [critical, high, medium, low]
+        status:
+          type: string
+          enum: [active, inactive, under-review]
+        entities:
+          type: array
+          items:
+            type: string
+        contactName:
+          type: string
+        contactEmail:
+          type: string
+        lastReviewDate:
+          type: string
+        nextReviewDate:
+          type: string
+        hasPciCertification:
+          type: boolean
+        certificationExpiry:
+          type: string
+        notes:
+          type: string
+
+    # ─── Activity ───────────────────────────────────────────────────────────
+    ActivityEntry:
+      type: object
+      required: [id, actor, action, target, createdAt]
+      properties:
+        id:
+          type: string
+        entityCode:
+          type: ["string", "null"]
+        actor:
+          type: string
+        action:
+          type: string
+        target:
+          type: string
+        createdAt:
+          type: string
+
+    # ─── Dashboard ──────────────────────────────────────────────────────────
+    DashboardSummary:
+      type: object
+      required: [entityCode, overallReadinessPct, openEvidenceCount, controlsPassing, controlsTotal, overdueEvidenceCount, dueSoonEvidenceCount, nextAocDate, activeFrameworks, activePolicies, openAssessments, vendors]
+      properties:
+        entityCode:
+          type: string
+        overallReadinessPct:
+          type: number
+        openEvidenceCount:
+          type: number
+        overdueEvidenceCount:
+          type: number
+        dueSoonEvidenceCount:
+          type: number
+        controlsPassing:
+          type: number
+        controlsTotal:
+          type: number
+        nextAocDate:
+          type: ["string", "null"]
+        activeFrameworks:
+          type: number
+        activePolicies:
+          type: number
+        openAssessments:
+          type: number
+        vendors:
+          type: number
+
+    StatusCount:
+      type: object
+      required: [status, count]
+      properties:
+        status:
+          type: string
+        count:
+          type: number
+
+    RequirementCoverage:
+      type: object
+      required: [requirementId, requirementName, domain, total, passing, inProgress, blocked, pct]
+      properties:
+        requirementId:
+          type: string
+        requirementName:
+          type: string
+        domain:
+          type: string
+        total:
+          type: number
+        passing:
+          type: number
+        inProgress:
+          type: number
+        blocked:
+          type: number
+        pct:
+          type: number
+
+    Milestone:
+      type: object
+      required: [id, title, description, dueDate, priority, category]
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        description:
+          type: string
+        dueDate:
+          type: string
+        priority:
+          type: string
+          enum: [critical, high, medium, low]
+        category:
+          type: string
+        daysRemaining:
+          type: number
