@@ -141,10 +141,14 @@ export function Shell({ children }: { children: React.ReactNode }) {
       {/* avatar) always sits at the bottom regardless of nav item count.     */}
       {/* ------------------------------------------------------------------ */}
       <aside className="w-64 border-r border-sidebar-border bg-sidebar text-sidebar-foreground flex flex-col h-full flex-shrink-0">
-        {/* App logo / wordmark — always visible at the top of the sidebar. */}
-        <div className="h-14 flex items-center px-4 border-b border-sidebar-border gap-2 text-sidebar-primary">
-          <ShieldCheck className="h-6 w-6" />
-          <span className="font-bold tracking-tight text-sidebar-foreground">Compliance OS</span>
+        {/* App logo — Gopuff wordmark, always visible at the top of the sidebar. */}
+        <div className="h-14 flex items-center px-4 border-b border-sidebar-border">
+          <img
+            src="/gopuff-logo-1.png"
+            alt="Gopuff"
+            className="h-7 w-auto object-contain"
+            style={{ filter: 'brightness(0) invert(1)' }}
+          />
         </div>
 
         {/* ---------------------------------------------------------------- */}
@@ -275,16 +279,14 @@ export function Shell({ children }: { children: React.ReactNode }) {
             <Settings className="h-4 w-4" />
             Settings
           </Link>
-          {/* Static user identity block. In a production app this would be
-              populated from an auth context (name, role, avatar URL). The
-              initials "GR" and role title are hardcoded placeholders. */}
+          {/* User identity block — Ravi Nori, Cybersecurity team. */}
           <div className="flex items-center gap-3 px-2">
             <Avatar className="h-9 w-9 border border-sidebar-border">
-              <AvatarFallback className="bg-sidebar-accent text-sidebar-foreground text-xs">GR</AvatarFallback>
+              <AvatarFallback className="bg-sidebar-accent text-sidebar-foreground text-xs">RN</AvatarFallback>
             </Avatar>
             <div className="flex flex-col">
-              <span className="text-sm font-medium leading-none">Grace Hopper</span>
-              <span className="text-xs text-sidebar-foreground/50">Director of GRC</span>
+              <span className="text-sm font-medium leading-none">Ravi Nori</span>
+              <span className="text-xs text-sidebar-foreground/50">Cybersecurity</span>
             </div>
           </div>
         </div>
