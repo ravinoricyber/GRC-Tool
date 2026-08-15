@@ -6,6 +6,18 @@
  * request has a lifecycle status: `requested → in-progress → submitted →
  * approved | rejected`.
  *
+ * Business rules enforced here:
+ * - The human-readable reference code (`EVR-YYYY-NNNN`) is generated
+ *   server-side from the current year and the total row count so clients
+ *   cannot influence it. The sequential number is zero-padded to four digits
+ *   for consistent lexicographic sorting in reports.
+ * - When a request transitions to status `"approved"`, the `approvedAt`
+ *   timestamp is stamped automatically by the server. Callers must not supply
+ *   this field themselves; doing so would allow backdating of approval records
+ *   and would undermine the integrity of the audit trail.
+ * - Every new evidence request writes an immutable entry to the activity log
+ *   so reviewers can see the full chronology of raised requests.
+ *
  * Routes:
  *   GET    /evidence      — list evidence requests with optional filtering
  *   POST   /evidence      — create a new evidence request
@@ -27,19 +39,39 @@ import {
   UpdateEvidenceResponse,
 } from "@workspace/api-zod";
 
+/**
+ * Express sub-router that owns all `/evidence` routes.
+ * @type {IRouter}
+ */
 const router: IRouter = Router();
 
 /**
  * GET /evidence
  *
- * Returns a paginated, filterable list of evidence requests. Supported
- * query parameters:
- * - `entityCode`   — filter by entity
- * - `status`       — filter by lifecycle status
- * - `priority`     — filter by priority (`"critical"`, `"high"`, `"medium"`, `"low"`)
- * - `frameworkId`  — filter by associated framework code
- * - `limit`        — maximum rows to return (default 200)
- * - `offset`       — number of rows to skip for pagination (default 0)
+ * Returns a paginated, filterable list of evidence request records. Filters
+ * are combined with AND semantics. When no filters are provided the full table
+ * is returned up to `limit`.
+ *
+ * Supported query parameters:
+ * - `entityCode`  {string} — Restrict to evidence requests for a specific entity.
+ * - `status`      {string} — Lifecycle status. One of `"requested"`,
+ *   `"in-progress"`, `"submitted"`, `"approved"`, `"rejected"`.
+ * - `priority`    {string} — Priority level. One of `"critical"`, `"high"`,
+ *   `"medium"`, `"low"`.
+ * - `frameworkId` {string} — Filter by framework code. **Note:** the query
+ *   parameter is named `frameworkId` but maps to the `frameworkCode` column.
+ * - `limit`       {number} — Maximum rows to return. Defaults to 200.
+ * - `offset`      {number} — Rows to skip for pagination. Defaults to 0.
+ *
+ * @param req       - Express `Request`.
+ * @param req.query - Parsed query string; all values treated as strings.
+ * @param res - Express `Response`.
+ *
+ * @returns {Promise<void>} Resolves after sending an HTTP 200 response whose
+ *   body conforms to the `ListEvidenceResponse` Zod schema:
+ *   `Array<{ id, code, title, status, priority, entityCode, dueDate, ... }>`.
+ *
+ * @throws Propagates unhandled database errors as uncaught rejections.
  */
 router.get("/evidence", async (req, res): Promise<void> => {
   const { entityCode, status, priority, frameworkId, limit, offset } = req.query as Record<string, string | undefined>;
@@ -62,10 +94,30 @@ router.get("/evidence", async (req, res): Promise<void> => {
 /**
  * POST /evidence
  *
- * Creates a new evidence request and writes an audit entry to the activity
- * log. The human-readable `code` (e.g. `EVR-2025-0042`) is generated
- * server-side from the current year and the total row count, providing a
- * sequential, year-scoped reference number that is easy to cite in reports.
+ * Creates a new evidence request and writes a corresponding entry to the
+ * immutable activity log so that auditors can reconstruct when each request
+ * was raised.
+ *
+ * Auto-generated fields (clients must not supply these):
+ * - `id`   — UUID generated via `crypto.randomUUID()`.
+ * - `code` — Human-readable reference in the format `EVR-YYYY-NNNN` where
+ *   `YYYY` is the current calendar year and `NNNN` is the next sequential
+ *   row count zero-padded to four digits (e.g. `EVR-2025-0042`). The
+ *   sequential number is derived from `db.$count(evidenceRequestsTable) + 1`
+ *   at insert time; this is eventually consistent under concurrent inserts but
+ *   is sufficient for human-readable references that need not be gapless.
+ *
+ * @param req      - Express `Request`.
+ * @param req.body - JSON payload conforming to `CreateEvidenceBody`:
+ *   `{ title, entityCode, controlId?, frameworkCode?, priority, dueDate?,
+ *      requestedBy?, assignedTo?, ... }`.
+ * @param res - Express `Response`.
+ *
+ * @returns {Promise<void>}
+ *   - HTTP 201 with a body conforming to `CreateEvidenceResponse` on success.
+ *   - HTTP 400 with `{ error: string }` when Zod validation fails.
+ *
+ * @throws Propagates unhandled database errors as uncaught rejections.
  */
 router.post("/evidence", async (req, res): Promise<void> => {
   const parsed = CreateEvidenceBody.safeParse(req.body);
@@ -90,6 +142,8 @@ router.post("/evidence", async (req, res): Promise<void> => {
     entityCode: data.entityCode,
     actor: "System",
     action: "created evidence request",
+    // The `target` string includes both the reference code and title for
+    // readability in the activity feed without requiring a join
     target: `${code} · ${data.title}`,
   });
 
@@ -99,7 +153,19 @@ router.post("/evidence", async (req, res): Promise<void> => {
 /**
  * GET /evidence/:id
  *
- * Returns a single evidence request by its UUID. Returns 404 when not found.
+ * Retrieves a single evidence request by its UUID primary key.
+ * Returns HTTP 404 when no matching row exists.
+ *
+ * @param req           - Express `Request`.
+ * @param req.params.id - The evidence request's UUID. Normalised to a plain
+ *   string to guard against Express surfacing it as an array.
+ * @param res - Express `Response`.
+ *
+ * @returns {Promise<void>}
+ *   - HTTP 200 with a body conforming to `GetEvidenceResponse` on success.
+ *   - HTTP 404 with `{ error: "Evidence request not found" }` when not found.
+ *
+ * @throws Propagates unhandled database errors as uncaught rejections.
  */
 router.get("/evidence/:id", async (req, res): Promise<void> => {
   const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
@@ -114,10 +180,31 @@ router.get("/evidence/:id", async (req, res): Promise<void> => {
 /**
  * PATCH /evidence/:id
  *
- * Partially updates an evidence request. When the incoming status is
- * `"approved"`, the `approvedAt` timestamp is automatically stamped
- * server-side — callers must not supply this field manually to prevent
- * backdating.
+ * Partially updates an evidence request. Any subset of the mutable fields
+ * may be supplied; unchanged fields retain their current database values.
+ *
+ * **Business rule — approval timestamp:**
+ * When `status` is set to `"approved"` in the request body, the server
+ * automatically injects `approvedAt = new Date()` into the update payload.
+ * This prevents callers from supplying a custom `approvedAt` value, which
+ * would allow backdating of approvals and would compromise the integrity of
+ * the compliance audit trail. Callers must not include `approvedAt` in the
+ * request body; it will be overwritten regardless.
+ *
+ * @param req           - Express `Request`.
+ * @param req.params.id - UUID of the evidence request to update.
+ * @param req.body      - Partial payload conforming to `UpdateEvidenceBody`.
+ *   Accepted fields include `status`, `assignedTo`, `dueDate`, `priority`,
+ *   `title`, `notes`, etc. Do **not** include `approvedAt`.
+ * @param res - Express `Response`.
+ *
+ * @returns {Promise<void>}
+ *   - HTTP 200 with a body conforming to `UpdateEvidenceResponse` on success.
+ *   - HTTP 400 with `{ error: string }` when Zod validation fails.
+ *   - HTTP 404 with `{ error: "Evidence request not found" }` when the UUID
+ *     is unknown.
+ *
+ * @throws Propagates unhandled database errors as uncaught rejections.
  */
 router.patch("/evidence/:id", async (req, res): Promise<void> => {
   const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
@@ -150,8 +237,23 @@ router.patch("/evidence/:id", async (req, res): Promise<void> => {
 /**
  * DELETE /evidence/:id
  *
- * Permanently removes an evidence request. No audit log entry is written
- * here; soft-deletes are not currently implemented for this resource.
+ * Permanently removes an evidence request record from the database.
+ * This is a hard delete; there is no soft-delete or recycle-bin mechanism
+ * for this resource. The operation is idempotent: deleting a non-existent ID
+ * succeeds silently (Drizzle's `.delete()` does not error on zero-row deletes).
+ *
+ * No activity log entry is written on deletion. If an audit trail of
+ * deletions is required in a future iteration, an activity log write should
+ * be added here before the DB call.
+ *
+ * @param req           - Express `Request`.
+ * @param req.params.id - UUID of the evidence request to delete.
+ * @param res - Express `Response`.
+ *
+ * @returns {Promise<void>} Resolves after sending an HTTP 204 No Content
+ *   response with an empty body.
+ *
+ * @throws Propagates unhandled database errors as uncaught rejections.
  */
 router.delete("/evidence/:id", async (req, res): Promise<void> => {
   const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;

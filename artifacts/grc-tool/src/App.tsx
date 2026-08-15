@@ -12,6 +12,14 @@
  *       RoutedErrorBoundary – Per-route error isolation; resets on navigation
  *         Switch / Route – Page-level code-split routes
  *   Toaster              – Global toast notification container
+ *
+ * Design decisions:
+ * - The `QueryClient` is created at module level (outside the component) so it
+ *   is only instantiated once per application lifecycle, not once per render.
+ * - The `Toaster` lives outside the `Router` so that toast notifications
+ *   triggered during a route transition are not unmounted mid-display.
+ * - `RoutedErrorBoundary` uses Wouter's `useLocation` as a `resetKey` so that
+ *   moving to a different route automatically clears any active page error.
  */
 
 import { type ReactNode } from 'react';
@@ -43,9 +51,18 @@ import {
 
 /**
  * Shared React Query client instance.
- * - `retry: 1`        – Retry failed requests once before surfacing an error.
- * - `staleTime: 30s`  – Cache responses for 30 seconds to avoid redundant
- *                       refetches when navigating between pages.
+ *
+ * Configured with application-wide defaults:
+ * - `retry: 1`       – Retry failed requests once before surfacing an error.
+ *                      Avoids hammering a flaky API while still recovering from
+ *                      transient network blips.
+ * - `staleTime: 30s` – Treat cached responses as fresh for 30 seconds. This
+ *                      prevents redundant refetches when navigating between
+ *                      pages within the same session while still re-fetching
+ *                      stale data on focus or remount after 30 s.
+ *
+ * The instance is created at module scope so it is shared across all renders
+ * and never re-created when React re-renders the `App` component.
  */
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -58,8 +75,15 @@ const queryClient = new QueryClient({
 
 /**
  * Declares all first-level application routes inside the persistent Shell layout.
- * The catch-all `<Route component={NotFound} />` must be last so Wouter only
- * renders it when no other route matched.
+ *
+ * Route order matters in Wouter's `<Switch>`: routes are matched top-to-bottom
+ * and only the first match renders. The catch-all `<Route component={NotFound} />`
+ * must therefore be last so Wouter only renders it when no other route matched.
+ *
+ * Every `<Route>` receives a `component` prop (lazy page component) rather than
+ * a JSX `children` prop so Wouter can tree-shake unused components in production.
+ *
+ * @returns The Shell wrapper containing the route switcher.
  */
 function Router() {
   return (
@@ -89,7 +113,14 @@ function Router() {
  * whenever the active route changes. This ensures a page-level crash does not
  * permanently block navigation — moving to a different route clears the error.
  *
- * @param children - The routed page components to protect.
+ * Implementation detail: `useLocation` returns the current pathname string.
+ * Passing it as `resetKey` to the boundary means that any change to the
+ * pathname (i.e. any navigation event) causes `componentDidUpdate` in the
+ * boundary to detect the changed key and call `resetError()`.
+ *
+ * @param children - The routed page components to protect. Must be a valid
+ *                   React node tree; crashes in this subtree are caught.
+ * @returns The `children` wrapped in an auto-resetting error boundary.
  */
 function RoutedErrorBoundary({ children }: { children: ReactNode }) {
   // useLocation returns the current pathname; passing it as resetKey means the
@@ -102,8 +133,21 @@ function RoutedErrorBoundary({ children }: { children: ReactNode }) {
  * Top-level application component exported as the default export.
  * Composes all global providers and injects the router.
  *
+ * Provider nesting rationale:
+ * - `QueryClientProvider` is outermost so every component in the tree can call
+ *   React Query hooks.
+ * - `EntityProvider` is inside Query so entity-aware queries can be composed
+ *   with query hooks without circular dependencies.
+ * - `TooltipProvider` wraps the router so tooltips in the Shell (e.g. the
+ *   entity error tooltip) and in page components all share the same Radix
+ *   tooltip root.
+ * - `Toaster` is a sibling of the router rather than nested inside it, so
+ *   toast notifications survive route transitions without being unmounted.
+ *
  * The `BASE_URL` trailing slash is stripped so that Wouter's base-path matching
  * works correctly in both the root (`/`) and nested (`/app/`) deployments.
+ *
+ * @returns The fully configured React application tree ready for mount.
  */
 function App() {
   return (

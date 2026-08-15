@@ -6,6 +6,17 @@
  * framework's human-readable `code` and `name` are denormalised onto the
  * assessment row to avoid joins on every read path.
  *
+ * Business rules enforced here:
+ * - On creation, the framework's `code` and `name` are fetched from
+ *   `frameworksTable` and stored directly on the assessment row
+ *   (denormalisation). This eliminates joins on every read and ensures that
+ *   the display name is preserved even if the framework record is later
+ *   renamed. If the framework does not exist, the raw `frameworkId` is used as
+ *   the code fallback and `frameworkName` is stored as `null`.
+ * - Assessment IDs are server-generated UUIDs.
+ * - Results are always ordered by `createdAt` ascending so the assessment
+ *   history is presented chronologically.
+ *
  * Routes:
  *   GET   /assessments      — list assessments with optional filtering
  *   POST  /assessments      — create a new assessment
@@ -26,15 +37,38 @@ import {
   UpdateAssessmentResponse,
 } from "@workspace/api-zod";
 
+/**
+ * Express sub-router that owns all `/assessments` routes.
+ * @type {IRouter}
+ */
 const router: IRouter = Router();
 
 /**
  * GET /assessments
  *
- * Returns assessments ordered by `createdAt` ascending. Supports filtering by:
- * - `entityCode`  — the entity being assessed
- * - `frameworkId` — the framework UUID the assessment targets
- * - `status`      — lifecycle status (e.g. `"open"`, `"in-review"`, `"closed"`)
+ * Returns assessment records ordered by `createdAt` ascending (oldest first),
+ * providing a chronological view of the entity's assessment history.
+ *
+ * Supported query parameters:
+ * - `entityCode`  {string} — Filter to assessments for a specific entity.
+ * - `frameworkId` {string} — Filter to assessments targeting a specific
+ *   framework UUID. Maps to the `frameworkId` column.
+ * - `status`      {string} — Lifecycle status. One of `"open"`,
+ *   `"in-review"`, `"closed"`.
+ *
+ * Multiple filters are combined with AND semantics.
+ *
+ * @param req       - Express `Request`.
+ * @param req.query - Parsed query string. Recognised keys: `entityCode`,
+ *   `frameworkId`, `status`.
+ * @param res - Express `Response`.
+ *
+ * @returns {Promise<void>} Resolves after sending an HTTP 200 response whose
+ *   body conforms to the `ListAssessmentsResponse` Zod schema:
+ *   `Array<{ id, entityCode, frameworkId, frameworkCode, frameworkName,
+ *             status, scheduledDate, ... }>`.
+ *
+ * @throws Propagates unhandled database errors as uncaught rejections.
  */
 router.get("/assessments", async (req, res): Promise<void> => {
   const { entityCode, frameworkId, status } = req.query as Record<string, string | undefined>;
@@ -43,6 +77,7 @@ router.get("/assessments", async (req, res): Promise<void> => {
   if (frameworkId) conditions.push(eq(assessmentsTable.frameworkId, frameworkId));
   if (status) conditions.push(eq(assessmentsTable.status, status));
 
+  // Always sort chronologically so assessment history is presented oldest-first
   const query = db.select().from(assessmentsTable).orderBy(assessmentsTable.createdAt);
   const rows = conditions.length ? await query.where(and(...conditions)) : await query;
   res.json(ListAssessmentsResponse.parse(serializeDates(rows)));
@@ -51,13 +86,29 @@ router.get("/assessments", async (req, res): Promise<void> => {
 /**
  * POST /assessments
  *
- * Creates a new assessment. The framework's `code` and `name` are looked up
- * from `frameworksTable` and stored directly on the assessment row
- * (denormalisation). This avoids repeated joins when listing assessments and
- * ensures the display name is preserved even if the framework is later renamed.
+ * Creates a new assessment and denormalises framework metadata onto the row.
  *
- * If the framework lookup yields no result the raw `frameworkId` is used as
- * the code fallback and `frameworkName` is stored as `null`.
+ * **Denormalisation step:** After validating the request body, this handler
+ * looks up the framework record identified by `parsed.data.frameworkId` and
+ * copies its `code` and `name` fields directly onto the assessment row as
+ * `frameworkCode` and `frameworkName`. This approach:
+ * - Removes the need for a JOIN whenever assessments are listed.
+ * - Preserves the framework's display name at the time of assessment creation,
+ *   so renaming the framework later does not silently alter historical records.
+ * - Falls back to the raw `frameworkId` string as `frameworkCode` and `null`
+ *   as `frameworkName` if the framework record cannot be found (defensive
+ *   coding against race conditions or orphaned references).
+ *
+ * @param req      - Express `Request`.
+ * @param req.body - JSON payload conforming to `CreateAssessmentBody`:
+ *   `{ entityCode, frameworkId, status?, scheduledDate?, assignedTo?, ... }`.
+ * @param res - Express `Response`.
+ *
+ * @returns {Promise<void>}
+ *   - HTTP 201 with a body conforming to `CreateAssessmentResponse` on success.
+ *   - HTTP 400 with `{ error: string }` when Zod validation fails.
+ *
+ * @throws Propagates unhandled database errors as uncaught rejections.
  */
 router.post("/assessments", async (req, res): Promise<void> => {
   const parsed = CreateAssessmentBody.safeParse(req.body);
@@ -71,6 +122,8 @@ router.post("/assessments", async (req, res): Promise<void> => {
   const fw = await db.select().from(frameworksTable).where(eq(frameworksTable.id, parsed.data.frameworkId));
   // Fall back to the raw ID if the framework record doesn't exist (defensive coding)
   const frameworkCode = fw[0]?.code ?? parsed.data.frameworkId;
+  // `frameworkName` is stored as null when the framework cannot be resolved so
+  // the UI can distinguish between "unknown framework" and "framework named null"
   const frameworkName = fw[0]?.name ?? null;
 
   const [row] = await db.insert(assessmentsTable).values({ id, frameworkCode, frameworkName, ...parsed.data }).returning();
@@ -80,7 +133,19 @@ router.post("/assessments", async (req, res): Promise<void> => {
 /**
  * GET /assessments/:id
  *
- * Returns a single assessment by its UUID. Returns 404 when not found.
+ * Retrieves a single assessment by its UUID primary key.
+ * Returns HTTP 404 when no matching row exists.
+ *
+ * @param req           - Express `Request`.
+ * @param req.params.id - The assessment's UUID. Normalised to a plain string
+ *   to guard against Express surfacing it as an array.
+ * @param res - Express `Response`.
+ *
+ * @returns {Promise<void>}
+ *   - HTTP 200 with a body conforming to `GetAssessmentResponse` on success.
+ *   - HTTP 404 with `{ error: "Assessment not found" }` when the UUID is unknown.
+ *
+ * @throws Propagates unhandled database errors as uncaught rejections.
  */
 router.get("/assessments/:id", async (req, res): Promise<void> => {
   const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
@@ -95,9 +160,31 @@ router.get("/assessments/:id", async (req, res): Promise<void> => {
 /**
  * PATCH /assessments/:id
  *
- * Partially updates an assessment. Common operations include advancing the
- * status or updating the scheduled completion date. Returns 404 when the
- * target row does not exist.
+ * Applies a partial update to an existing assessment record. Only the fields
+ * present in the request body are written; all other columns retain their
+ * current values.
+ *
+ * Common use-cases:
+ * - Advancing the status through its lifecycle (`"open"` → `"in-review"` →
+ *   `"closed"`).
+ * - Updating the scheduled completion date when work is rescheduled.
+ * - Assigning or re-assigning the assessment to a different reviewer.
+ *
+ * If Drizzle's `.returning()` yields an empty array, the target row does not
+ * exist and HTTP 404 is returned.
+ *
+ * @param req           - Express `Request`.
+ * @param req.params.id - UUID of the assessment to update.
+ * @param req.body      - Partial payload conforming to `UpdateAssessmentBody`.
+ *   Any subset of the assessment's mutable fields is accepted.
+ * @param res - Express `Response`.
+ *
+ * @returns {Promise<void>}
+ *   - HTTP 200 with a body conforming to `UpdateAssessmentResponse` on success.
+ *   - HTTP 400 with `{ error: string }` when Zod validation fails.
+ *   - HTTP 404 with `{ error: "Assessment not found" }` when the UUID is unknown.
+ *
+ * @throws Propagates unhandled database errors as uncaught rejections.
  */
 router.patch("/assessments/:id", async (req, res): Promise<void> => {
   const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;

@@ -6,6 +6,14 @@
  * are ordered by creation date to make the most-recent attestation easy to
  * find.
  *
+ * Business rules enforced here:
+ * - AOC IDs are server-generated UUIDs; clients cannot pre-determine them.
+ * - Results are always ordered by `createdAt` ascending so the oldest (baseline)
+ *   AOC appears first and the most recent one last, which matches the expected
+ *   chronological audit trail order.
+ * - The query parameter `frameworkId` is mapped to the database column
+ *   `frameworkCode` (naming discrepancy inherited from the initial schema design).
+ *
  * Routes:
  *   GET   /aocs      — list AOCs with optional filtering
  *   POST  /aocs      — create a new AOC record
@@ -26,15 +34,38 @@ import {
   UpdateAocResponse,
 } from "@workspace/api-zod";
 
+/**
+ * Express sub-router that owns all `/aocs` routes.
+ * @type {IRouter}
+ */
 const router: IRouter = Router();
 
 /**
  * GET /aocs
  *
- * Returns AOC records ordered by `createdAt` ascending. Supports optional
- * filtering by:
- * - `entityCode`  — the entity the AOC was issued for
- * - `frameworkId` — the compliance framework the AOC covers (maps to `frameworkCode`)
+ * Returns AOC records ordered by `createdAt` ascending (oldest first). This
+ * chronological order reflects the progression of an entity's compliance
+ * history and is the most natural view for compliance auditors reviewing the
+ * certification timeline.
+ *
+ * Supported query parameters:
+ * - `entityCode`  {string} — Filter to AOCs issued for a specific entity.
+ *   Maps to the `entityCode` column (exact equality match).
+ * - `frameworkId` {string} — Filter to AOCs covering a specific compliance
+ *   framework. **Note:** the query parameter is named `frameworkId` but maps
+ *   to the `frameworkCode` column in the database (historical naming discrepancy).
+ *
+ * Multiple filters are combined with AND semantics.
+ *
+ * @param req       - Express `Request`.
+ * @param req.query - Parsed query string. Recognised keys: `entityCode`, `frameworkId`.
+ * @param res - Express `Response`.
+ *
+ * @returns {Promise<void>} Resolves after sending an HTTP 200 response whose
+ *   body conforms to the `ListAocsResponse` Zod schema:
+ *   `Array<{ id, entityCode, frameworkCode, issuedDate, expiryDate, fileUrl, ... }>`.
+ *
+ * @throws Propagates unhandled database errors as uncaught rejections.
  */
 router.get("/aocs", async (req, res): Promise<void> => {
   const { entityCode, frameworkId } = req.query as Record<string, string | undefined>;
@@ -52,8 +83,21 @@ router.get("/aocs", async (req, res): Promise<void> => {
 /**
  * POST /aocs
  *
- * Creates a new AOC record with a server-generated UUID. The body is
- * validated against `CreateAocBody` before the insert.
+ * Creates a new Attestation of Compliance record with a server-generated UUID.
+ * The request body is validated against `CreateAocBody` before the insert,
+ * so invalid payloads are rejected cheaply without a database round-trip.
+ *
+ * @param req      - Express `Request`.
+ * @param req.body - JSON payload conforming to `CreateAocBody`:
+ *   `{ entityCode, frameworkCode, issuedDate, expiryDate, fileUrl?, assessorName?, ... }`.
+ * @param res - Express `Response`.
+ *
+ * @returns {Promise<void>}
+ *   - HTTP 201 with a body conforming to `CreateAocResponse` on success.
+ *   - HTTP 400 with `{ error: string }` when Zod validation fails.
+ *
+ * @throws Propagates unhandled database errors (e.g. foreign key violations)
+ *   as uncaught rejections.
  */
 router.post("/aocs", async (req, res): Promise<void> => {
   const parsed = CreateAocBody.safeParse(req.body);
@@ -61,6 +105,7 @@ router.post("/aocs", async (req, res): Promise<void> => {
     res.status(400).json({ error: parsed.error.message });
     return;
   }
+  // Server-generated UUID ensures clients cannot pre-determine or spoof IDs
   const id = crypto.randomUUID();
   const [row] = await db.insert(aocsTable).values({ id, ...parsed.data }).returning();
   res.status(201).json(CreateAocResponse.parse(serializeDates(row)));
@@ -69,7 +114,20 @@ router.post("/aocs", async (req, res): Promise<void> => {
 /**
  * GET /aocs/:id
  *
- * Returns a single AOC by its UUID. Returns 404 when not found.
+ * Retrieves a single AOC record by its UUID primary key.
+ * Returns HTTP 404 when no matching row exists, conforming to REST
+ * singleton-resource conventions.
+ *
+ * @param req           - Express `Request`.
+ * @param req.params.id - The AOC's UUID. Normalised to a plain string to
+ *   guard against Express surfacing it as an array.
+ * @param res - Express `Response`.
+ *
+ * @returns {Promise<void>}
+ *   - HTTP 200 with a body conforming to `GetAocResponse` on success.
+ *   - HTTP 404 with `{ error: "AOC not found" }` when the UUID is unknown.
+ *
+ * @throws Propagates unhandled database errors as uncaught rejections.
  */
 router.get("/aocs/:id", async (req, res): Promise<void> => {
   const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
@@ -84,9 +142,31 @@ router.get("/aocs/:id", async (req, res): Promise<void> => {
 /**
  * PATCH /aocs/:id
  *
- * Partially updates an AOC. Typical use-cases include adding document
- * metadata (e.g. a file URL) or updating the expiry date. Returns 404 when
- * the target row does not exist.
+ * Applies a partial update to an existing AOC record. Only the fields present
+ * in the request body are written to the database; all other columns retain
+ * their current values.
+ *
+ * Common use-cases:
+ * - Attaching a document URL (`fileUrl`) once the signed AOC PDF has been
+ *   uploaded to object storage.
+ * - Correcting the expiry date after a typo during initial entry.
+ * - Updating the assessor name or QSA details.
+ *
+ * If Drizzle's `.returning()` yields an empty array, the target row does not
+ * exist and HTTP 404 is returned.
+ *
+ * @param req           - Express `Request`.
+ * @param req.params.id - UUID of the AOC to update.
+ * @param req.body      - Partial payload conforming to `UpdateAocBody`.
+ *   Any subset of the AOC's mutable fields is accepted.
+ * @param res - Express `Response`.
+ *
+ * @returns {Promise<void>}
+ *   - HTTP 200 with a body conforming to `UpdateAocResponse` on success.
+ *   - HTTP 400 with `{ error: string }` when Zod validation fails.
+ *   - HTTP 404 with `{ error: "AOC not found" }` when the UUID is unknown.
+ *
+ * @throws Propagates unhandled database errors as uncaught rejections.
  */
 router.patch("/aocs/:id", async (req, res): Promise<void> => {
   const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;

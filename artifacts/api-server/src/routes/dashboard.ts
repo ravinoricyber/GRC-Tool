@@ -6,6 +6,17 @@
  * the queries readable and portable. All endpoints require an `entityCode`
  * query parameter so the dashboard can display per-entity metrics.
  *
+ * Design decisions:
+ * - In-process aggregation is preferred over SQL GROUP BY / window functions
+ *   to keep the query logic transparent, testable, and easy to extend.
+ * - "Due soon" thresholds (7 days for evidence, 90/365 days for AOC renewal)
+ *   are business constants defined close to the logic that uses them.
+ * - The `controlsPassing` percentage uses global (non-entity-scoped) control
+ *   counts because controls represent a shared compliance baseline across all
+ *   entities in the current data model.
+ * - All responses are validated through Zod schemas before sending to ensure
+ *   the shape remains in sync with the generated API client.
+ *
  * Routes:
  *   GET /dashboard/summary             — headline KPIs for a given entity
  *   GET /dashboard/evidence-by-status  — evidence request counts grouped by status
@@ -24,21 +35,47 @@ import {
   GetUpcomingMilestonesResponse,
 } from "@workspace/api-zod";
 
+/**
+ * Express sub-router that owns all `/dashboard/*` routes.
+ * @type {IRouter}
+ */
 const router: IRouter = Router();
 
 /**
  * GET /dashboard/summary
  *
- * Returns headline compliance KPIs for a specific entity. Metrics include:
- * - Overall readiness percentage (passing controls / total controls)
- * - Open, overdue, and due-soon evidence request counts
- * - Active framework and policy counts (global, not entity-scoped)
- * - Open assessment count and vendor count
- * - The entity's next AOC renewal date
+ * Returns headline compliance KPIs for a specific entity. This is the primary
+ * data source for the top-level dashboard scorecard widgets.
  *
- * "Due soon" is defined as having a due date within the next 7 days.
- * Controls and vendors are fetched globally (not filtered by entity) because
- * those tables represent the shared compliance baseline.
+ * **Metrics computed:**
+ * - `overallReadinessPct`    — Percentage of controls with `finding = "in-place"`
+ *   relative to total controls. Control counts are global (not entity-scoped)
+ *   because controls represent the shared compliance baseline.
+ * - `openEvidenceCount`      — Evidence requests in `"requested"` or `"in-progress"` state.
+ * - `overdueEvidenceCount`   — Open evidence requests whose `dueDate` is in the past.
+ * - `dueSoonEvidenceCount`   — Open evidence requests due within the next 7 days
+ *   (but not yet overdue). The 7-day threshold is a business rule that drives
+ *   the "attention required" dashboard callout.
+ * - `controlsPassing`        — Absolute count of controls with `finding = "in-place"`.
+ * - `controlsTotal`          — Total control count across all frameworks.
+ * - `nextAocDate`            — The entity's next AOC renewal date from `entitiesTable`
+ *   (may be `null` if not configured).
+ * - `activeFrameworks`       — Count of framework records with `status = "active"`.
+ * - `activePolicies`         — Count of policy records with `status = "current"`.
+ * - `openAssessments`        — Count of assessments for the entity that are not `"closed"`.
+ * - `vendors`                — Total vendor count across all entities (global figure).
+ *
+ * @param req                 - Express `Request`.
+ * @param req.query.entityCode - {string} **Required.** The short code of the entity
+ *   for which to compute metrics (e.g. `"gopuff"`). Returns HTTP 400 when absent.
+ * @param res - Express `Response`.
+ *
+ * @returns {Promise<void>}
+ *   - HTTP 200 with a body conforming to `GetDashboardSummaryResponse` on success.
+ *   - HTTP 400 with `{ error: "entityCode is required" }` when the parameter
+ *     is missing.
+ *
+ * @throws Propagates unhandled database errors as uncaught rejections.
  */
 router.get("/dashboard/summary", async (req, res): Promise<void> => {
   const entityCode = req.query.entityCode as string;
@@ -52,11 +89,14 @@ router.get("/dashboard/summary", async (req, res): Promise<void> => {
 
   // Count open evidence requests and classify by urgency
   const evidenceRows = await db.select().from(evidenceRequestsTable).where(eq(evidenceRequestsTable.entityCode, entityCode));
+  // "Open" = not yet submitted, approved, or rejected
   const openEvidence = evidenceRows.filter(e => e.status === "requested" || e.status === "in-progress");
   const now = new Date();
-  // "Due soon" threshold: 7 days from now
+  // "Due soon" threshold: 7 days from now (business rule)
   const soon = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+  // Overdue: due date is strictly in the past
   const overdue = openEvidence.filter(e => e.dueDate && new Date(e.dueDate) < now);
+  // Due soon: due date is today or within the next 7 days (inclusive on both ends)
   const dueSoon = openEvidence.filter(e => e.dueDate && new Date(e.dueDate) >= now && new Date(e.dueDate) <= soon);
 
   // Controls — fetched globally; `in-place` is the passing finding value
@@ -103,10 +143,33 @@ router.get("/dashboard/summary", async (req, res): Promise<void> => {
 /**
  * GET /dashboard/evidence-by-status
  *
- * Returns evidence request counts grouped by status for a specific entity.
- * All five canonical status values are always present in the response (with
- * a count of 0 when no rows match) so the front-end chart does not need to
- * handle missing keys.
+ * Returns the count of evidence requests in each lifecycle status for a
+ * specific entity. Intended for use in the dashboard status-distribution
+ * chart widget.
+ *
+ * All five canonical status values are **always** present in the response,
+ * even when a given status has no rows in the database. This guarantee allows
+ * the front-end chart to render fixed-position bars without conditional logic
+ * for missing keys.
+ *
+ * Aggregation is performed in the database via `GROUP BY` to avoid loading all
+ * evidence rows into process memory, which is important for entities with large
+ * evidence libraries.
+ *
+ * @param req                 - Express `Request`.
+ * @param req.query.entityCode - {string} **Required.** Short code of the entity.
+ *   Returns HTTP 400 when absent.
+ * @param res - Express `Response`.
+ *
+ * @returns {Promise<void>}
+ *   - HTTP 200 with a body conforming to `GetEvidenceByStatusResponse`:
+ *     `Array<{ status: string, count: number }>` with exactly 5 entries
+ *     (one per canonical status, in the order: `"requested"`, `"in-progress"`,
+ *     `"submitted"`, `"approved"`, `"rejected"`).
+ *   - HTTP 400 with `{ error: "entityCode is required" }` when the parameter
+ *     is missing.
+ *
+ * @throws Propagates unhandled database errors as uncaught rejections.
  */
 router.get("/dashboard/evidence-by-status", async (req, res): Promise<void> => {
   const entityCode = req.query.entityCode as string;
@@ -135,13 +198,41 @@ router.get("/dashboard/evidence-by-status", async (req, res): Promise<void> => {
 /**
  * GET /dashboard/control-coverage
  *
- * Returns per-domain control coverage metrics for the PCI DSS 4.0 framework.
- * Controls are grouped by their `domainNumber` (1–12, corresponding to the
- * 12 PCI DSS requirements). Each domain entry includes pass/in-progress/
- * blocked counts and an overall pass percentage.
+ * Returns per-domain control coverage metrics for the PCI DSS 4.0 framework,
+ * ordered by requirement number. This data powers the "Control Coverage" bar
+ * chart on the compliance dashboard.
  *
- * The domain name map is defined in-file because PCI DSS requirement names
- * are stable and do not need to be stored in the database.
+ * **Scoping:** Controls are filtered to `frameworkCode = "pci-dss-4"`. Only
+ * this framework is visualised in the coverage chart; other frameworks appear
+ * in the summary counts but not in per-domain breakdowns.
+ *
+ * **Domain grouping:** Controls are grouped by their `domainNumber` (1–12,
+ * corresponding to the 12 PCI DSS requirements). The canonical domain names
+ * are defined in a static in-file map (`PCI_DOMAINS`) because PCI DSS
+ * requirement titles are stable and do not need database storage.
+ *
+ * **Finding classification:**
+ * - `passing`    — Controls with `finding = "in-place"`.
+ * - `inProgress` — Controls with `finding = "not-tested"` (treated as
+ *   "in-progress" by the UI — assessment work is underway but not complete).
+ * - `blocked`    — Controls with `finding = "not-in-place"` (active gap).
+ * - `pct`        — Percentage of controls in this domain that are passing,
+ *   rounded to the nearest integer. Division-by-zero is guarded.
+ *
+ * @param req                 - Express `Request`.
+ * @param req.query.entityCode - {string} **Required.** Short code of the entity.
+ *   Returns HTTP 400 when absent. (Currently used for authorisation context;
+ *   control data itself is not entity-scoped in this query.)
+ * @param res - Express `Response`.
+ *
+ * @returns {Promise<void>}
+ *   - HTTP 200 with a body conforming to `GetControlCoverageResponse`:
+ *     `Array<{ requirementId, requirementName, domain, total, passing,
+ *               inProgress, blocked, pct }>`, sorted by `requirementId` ascending.
+ *   - HTTP 400 with `{ error: "entityCode is required" }` when the parameter
+ *     is missing.
+ *
+ * @throws Propagates unhandled database errors as uncaught rejections.
  */
 router.get("/dashboard/control-coverage", async (req, res): Promise<void> => {
   const entityCode = req.query.entityCode as string;
@@ -164,7 +255,11 @@ router.get("/dashboard/control-coverage", async (req, res): Promise<void> => {
     byDomain.get(d)!.push(c);
   }
 
-  // Static mapping of PCI DSS requirement numbers to their official titles
+  /**
+   * Static mapping of PCI DSS requirement numbers (1–12) to their official
+   * requirement titles from PCI DSS v4.0. Stored in-code because requirement
+   * names are stable across environments and do not warrant a database table.
+   */
   const PCI_DOMAINS: Record<number, { name: string }> = {
     1: { name: "Network Security Controls" },
     2: { name: "Secure Configurations" },
@@ -190,6 +285,7 @@ router.get("/dashboard/control-coverage", async (req, res): Promise<void> => {
     return {
       requirementId: String(domainNum),
       requirementName: PCI_DOMAINS[domainNum]?.name ?? `Requirement ${domainNum}`,
+      // `domain` duplicates `requirementName` for clients that reference either field
       domain: PCI_DOMAINS[domainNum]?.name ?? `Requirement ${domainNum}`,
       total: controls.length,
       passing,
@@ -206,14 +302,40 @@ router.get("/dashboard/control-coverage", async (req, res): Promise<void> => {
 /**
  * GET /dashboard/upcoming-milestones
  *
- * Returns time-sensitive compliance items due in the near future for a
- * specific entity, sorted by days remaining ascending. At most 10 items are
- * returned to keep the dashboard widget focused on the most urgent work.
+ * Returns time-sensitive compliance items due in the near future for a specific
+ * entity, sorted by days remaining ascending (most urgent first). At most 10
+ * items are returned to keep the dashboard widget focused on the most critical
+ * work items.
  *
- * Two categories of milestones are included:
- * 1. **Evidence requests** — open items due within the next 60 days.
- * 2. **AOC expiry** — the entity's next AOC renewal if it falls within 365 days.
- *    Priority is `"critical"` when fewer than 90 days remain, otherwise `"high"`.
+ * **Two milestone categories are included:**
+ *
+ * 1. **Evidence requests** — Open items (`"requested"` or `"in-progress"`)
+ *    with a `dueDate` between today and 60 days from now. Items more than 60
+ *    days out are excluded to reduce noise; overdue items (negative days) are
+ *    also excluded because they surface in the `overdueEvidenceCount` KPI
+ *    instead. The `priority` field is passed through as-is from the evidence
+ *    request record.
+ *
+ * 2. **AOC renewal** — A synthetic milestone derived from the entity's
+ *    `nextAocDate` field. Included when the renewal is between today and 365
+ *    days out. Priority escalates from `"high"` to `"critical"` when fewer
+ *    than 90 days remain, prompting the compliance team to accelerate the
+ *    renewal process.
+ *
+ * @param req                 - Express `Request`.
+ * @param req.query.entityCode - {string} **Required.** Short code of the entity.
+ *   Returns HTTP 400 when absent.
+ * @param res - Express `Response`.
+ *
+ * @returns {Promise<void>}
+ *   - HTTP 200 with a body conforming to `GetUpcomingMilestonesResponse`:
+ *     `Array<{ id, title, description, dueDate, priority, category,
+ *               daysRemaining }>`, sorted by `daysRemaining` ascending,
+ *     capped at 10 items.
+ *   - HTTP 400 with `{ error: "entityCode is required" }` when the parameter
+ *     is missing.
+ *
+ * @throws Propagates unhandled database errors as uncaught rejections.
  */
 router.get("/dashboard/upcoming-milestones", async (req, res): Promise<void> => {
   const entityCode = req.query.entityCode as string;
@@ -230,6 +352,10 @@ router.get("/dashboard/upcoming-milestones", async (req, res): Promise<void> => 
     .from(evidenceRequestsTable)
     .where(eq(evidenceRequestsTable.entityCode, entityCode));
 
+  /**
+   * Accumulated milestone entries from both evidence requests and the AOC
+   * renewal deadline. The shape matches `GetUpcomingMilestonesResponse` items.
+   */
   const milestones: Array<{
     id: string;
     title: string;
@@ -245,11 +371,13 @@ router.get("/dashboard/upcoming-milestones", async (req, res): Promise<void> => 
     const due = new Date(e.dueDate);
     // Convert ms difference to whole days (ceiling so same-day = 1 not 0)
     const days = Math.ceil((due.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
-    // Only surface open items that are due within the 60-day horizon
+    // Only surface open items that are due within the 60-day horizon (business rule)
     if (days > 0 && days <= 60 && (e.status === "requested" || e.status === "in-progress")) {
       milestones.push({
         id: e.id,
         title: e.title,
+        // Include the reference code and requestor in the description so the
+        // widget is self-contained without requiring a separate lookup
         description: `Evidence request ${e.code} — ${e.requestedBy ?? "Internal"}`,
         dueDate: e.dueDate,
         priority: e.priority,
@@ -267,11 +395,13 @@ router.get("/dashboard/upcoming-milestones", async (req, res): Promise<void> => 
     // Include AOC renewals up to 1 year out so planning can begin well in advance
     if (days > 0 && days <= 365) {
       milestones.push({
+        // Synthetic ID scoped to the entity so the UI can render a stable key
         id: `aoc-${entityCode}`,
         title: "AOC Expiry",
         description: `Annual AOC renewal due for ${entityCode}`,
         dueDate: entity[0].nextAocDate,
-        // Escalate priority to critical when fewer than 90 days remain
+        // Business rule: escalate to critical when fewer than 90 days remain
+        // (90-day threshold gives the team one quarter to complete the renewal)
         priority: days <= 90 ? "critical" : "high",
         category: "aoc",
         daysRemaining: days,
@@ -279,7 +409,7 @@ router.get("/dashboard/upcoming-milestones", async (req, res): Promise<void> => 
     }
   }
 
-  // Sort all milestones by urgency and return at most 10 to keep the widget concise
+  // Sort all milestones by urgency (fewest days remaining first) and cap at 10
   milestones.sort((a, b) => a.daysRemaining - b.daysRemaining);
   res.json(GetUpcomingMilestonesResponse.parse(serializeDates(milestones.slice(0, 10))));
 });

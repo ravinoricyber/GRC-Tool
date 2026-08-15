@@ -6,21 +6,31 @@
  * four independent React Query fetches:
  *
  *   1. **Dashboard Summary** (`useGetDashboardSummary`) – KPI cards showing
- *      overall readiness %, controls passing, open evidence count, and the next
- *      AOC expiry date.
- *   2. **Control Coverage** (`useGetControlCoverage`) – Progress bars for each
- *      of the 12 PCI DSS principal requirements.
- *   3. **Upcoming Milestones** (`useGetUpcomingMilestones`) – Date-card list of
- *      forthcoming compliance deadlines.
- *   4. **Recent Activity** (`useListActivity`) – Timeline of the last 5 system
- *      events scoped to the active entity.
+ *      overall readiness %, controls passing out of total, open evidence count
+ *      (with overdue and due-soon sub-counts), and the next AOC expiry date.
+ *   2. **Control Coverage** (`useGetControlCoverage`) – An ordered array of
+ *      per-requirement coverage percentages (REQ-1 through REQ-12) rendered as
+ *      progress bars with monospace IDs and truncated requirement names.
+ *   3. **Upcoming Milestones** (`useGetUpcomingMilestones`) – A date-card list
+ *      of forthcoming compliance deadlines sorted by due date ascending, with
+ *      priority badges (destructive for critical, secondary otherwise).
+ *   4. **Recent Activity** (`useListActivity`) – The 5 most recent system/user
+ *      events, rendered as a vertical timeline. The full log is at `/activity`.
  *
- * Each section independently handles its own loading and error states so a
- * failure in one does not block the others from rendering.
+ * Each section is fetched and rendered independently so a failure in one
+ * section does not block the others from displaying their data.
  *
- * All queries include `entityCode` in their query key so React Query maintains
- * separate cache entries per entity. Switching the entity in the sidebar causes
- * each query to refetch with the new `entityCode`.
+ * Entity scoping:
+ * All four queries include `entityCode` in both the API call parameters and
+ * the React Query cache key. Switching the active entity in the sidebar causes
+ * each query to refetch with the new `entityCode` while keeping the previous
+ * entity's data in cache for instant re-display if the user switches back.
+ *
+ * Layout:
+ * - Row 1: 4-column KPI card grid (collapses to 2 on md, 1 on sm).
+ * - Row 2: 2/3 + 1/3 two-column grid:
+ *   - Left  (lg:col-span-2): PCI DSS requirement coverage progress bars.
+ *   - Right (lg:col-span-1): Upcoming Milestones + Recent Activity stacked.
  */
 
 import React from 'react';
@@ -55,17 +65,31 @@ import {
 import { Skeleton } from '@/components/ui/skeleton';
 
 /**
- * Dashboard page component. Fetches and renders the compliance overview for
- * the entity currently selected in the sidebar.
+ * Dashboard page component. The default route (`/`).
+ *
+ * Fetches and renders the compliance overview for the entity currently selected
+ * in the sidebar entity switcher. All data is read from the `activeEntity`
+ * context value to ensure consistency with other pages.
+ *
+ * @returns The full Dashboard page JSX including KPI cards, coverage progress
+ *          bars, milestone cards, and recent activity timeline.
  */
 export default function Dashboard() {
   // Read the active entity code from context; all queries are scoped to it.
   const { activeEntity } = useEntity();
   
   /**
-   * KPI summary data: overall readiness %, controls totals, evidence counts,
-   * and the next AOC date. Query key includes entityCode so the cache is
-   * entity-specific and refetches automatically on entity switch.
+   * KPI summary query.
+   *
+   * Returns: overall readiness %, controls passing/total, open evidence count,
+   * overdue/due-soon evidence sub-counts, and the next AOC expiry date string.
+   *
+   * React Query wiring:
+   * - `entityCode: activeEntity` scopes the request to the current entity.
+   * - `queryKey: getGetDashboardSummaryQueryKey({ entityCode: activeEntity })`
+   *   creates a cache key like `["getDashboardSummary", { entityCode: "gopuff" }]`.
+   *   Each entity gets its own cache slot so switching entities never serves
+   *   another entity's KPIs.
    */
   const { data: summary, isLoading: isLoadingSummary, isError: isErrorSummary, error: errorSummary, refetch: refetchSummary } = useGetDashboardSummary(
     { entityCode: activeEntity },
@@ -73,8 +97,13 @@ export default function Dashboard() {
   );
 
   /**
-   * Per-requirement coverage percentages for the PCI DSS progress bars.
-   * Returns an array ordered by requirement number.
+   * Per-requirement coverage query.
+   *
+   * Returns an array of `{ requirementId, requirementName, pct }` objects
+   * representing the percentage of controls in-place for each PCI DSS
+   * principal requirement (REQ-1 through REQ-12).
+   *
+   * React Query wiring: same entity-scoped key pattern as the summary query.
    */
   const { data: coverage, isLoading: isLoadingCoverage, isError: isErrorCoverage, error: errorCoverage, refetch: refetchCoverage } = useGetControlCoverage(
     { entityCode: activeEntity },
@@ -82,7 +111,13 @@ export default function Dashboard() {
   );
 
   /**
-   * Upcoming compliance deadlines sorted by due date ascending.
+   * Upcoming milestones query.
+   *
+   * Returns an array of compliance deadlines sorted by `dueDate` ascending.
+   * Each item has: `id`, `title`, `description`, `dueDate`, and `priority`.
+   *
+   * React Query wiring: entity-scoped key pattern. Empty array default ensures
+   * the `?.length === 0` empty-state check is safe before data arrives.
    */
   const { data: milestones, isLoading: isLoadingMilestones, isError: isErrorMilestones, error: errorMilestones, refetch: refetchMilestones } = useGetUpcomingMilestones(
     { entityCode: activeEntity },
@@ -90,8 +125,14 @@ export default function Dashboard() {
   );
 
   /**
-   * The 5 most recent activity log entries for the active entity, used in the
-   * "Recent Activity" sidebar card. The full log is available on /activity.
+   * Recent activity query.
+   *
+   * Fetches only the 5 most recent activity entries (`limit: 5`) for the
+   * Dashboard's condensed timeline. The full log at `/activity` uses `limit: 100`.
+   * Both queries occupy separate cache entries because `limit` is part of the key.
+   *
+   * React Query wiring: `entityCode` + `limit` both included in the query key
+   * to keep the Dashboard and Activity page caches independent.
    */
   const { data: activities, isLoading: isLoadingActivity, isError: isErrorActivity, error: errorActivity, refetch: refetchActivity } = useListActivity(
     { entityCode: activeEntity, limit: 5 },
@@ -107,8 +148,11 @@ export default function Dashboard() {
 
       {/* ------------------------------------------------------------------ */}
       {/* KPI Cards                                                            */}
-      {/* Renders 4 skeletons while loading, a spanning error on failure, or  */}
-      {/* the real KPI cards once data resolves.                               */}
+      {/* Four states:                                                         */}
+      {/*   Loading → 4 × KpiSkeleton side by side (same grid as real cards). */}
+      {/*   Error   → QueryError spanning all 4 columns.                       */}
+      {/*   Data    → 4 real KPI cards.                                        */}
+      {/* The 4-column grid collapses to 2 on md and 1 on sm for responsiveness. */}
       {/* ------------------------------------------------------------------ */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         {isLoadingSummary ? (
@@ -119,25 +163,26 @@ export default function Dashboard() {
             <KpiSkeleton />
           </>
         ) : isErrorSummary ? (
-          /* Error spans all 4 columns so it fills the KPI row. */
+          /* Error spans all 4 columns so it fills the KPI row visually. */
           <div className="col-span-4">
             <QueryError error={errorSummary} onRetry={refetchSummary} className="rounded-lg border bg-card" />
           </div>
         ) : (
           <>
-            {/* Overall Readiness % */}
+            {/* KPI 1: Overall Readiness % */}
             <Card className="shadow-sm">
               <CardHeader className="flex flex-row items-center justify-between pb-2">
                 <CardTitle className="text-sm font-medium text-muted-foreground">Overall Readiness</CardTitle>
                 <ShieldAlert className="h-4 w-4 text-primary" />
               </CardHeader>
               <CardContent>
+                {/* `?? 0` guards against null/undefined from the API during a partial load. */}
                 <div className="text-3xl font-bold font-mono">{summary?.overallReadinessPct ?? 0}%</div>
                 <p className="text-xs text-muted-foreground mt-1">Across all frameworks</p>
               </CardContent>
             </Card>
             
-            {/* Controls Passing — shows passing count out of total. */}
+            {/* KPI 2: Controls Passing — numerator / denominator format. */}
             <Card className="shadow-sm">
               <CardHeader className="flex flex-row items-center justify-between pb-2">
                 <CardTitle className="text-sm font-medium text-muted-foreground">Controls Passing</CardTitle>
@@ -145,13 +190,15 @@ export default function Dashboard() {
               </CardHeader>
               <CardContent>
                 <div className="text-3xl font-bold font-mono">
-                  {summary?.controlsPassing ?? 0} <span className="text-lg text-muted-foreground">/ {summary?.controlsTotal ?? 0}</span>
+                  {summary?.controlsPassing ?? 0}
+                  {/* Total rendered smaller and muted to emphasise the passing count. */}
+                  <span className="text-lg text-muted-foreground"> / {summary?.controlsTotal ?? 0}</span>
                 </div>
                 <p className="text-xs text-muted-foreground mt-1">Verified in-place</p>
               </CardContent>
             </Card>
 
-            {/* Open Evidence — highlights overdue count in destructive colour. */}
+            {/* KPI 3: Open Evidence — overdue count highlighted in destructive red. */}
             <Card className="shadow-sm">
               <CardHeader className="flex flex-row items-center justify-between pb-2">
                 <CardTitle className="text-sm font-medium text-muted-foreground">Open Evidence</CardTitle>
@@ -160,12 +207,13 @@ export default function Dashboard() {
               <CardContent>
                 <div className="text-3xl font-bold font-mono">{summary?.openEvidenceCount ?? 0}</div>
                 <p className="text-xs text-muted-foreground mt-1">
+                  {/* Overdue count draws attention via `text-destructive`. */}
                   <span className="text-destructive font-medium">{summary?.overdueEvidenceCount ?? 0} overdue</span>, {summary?.dueSoonEvidenceCount ?? 0} due soon
                 </p>
               </CardContent>
             </Card>
 
-            {/* Next AOC Expiry — formats the ISO date string to "MMM d, yyyy". */}
+            {/* KPI 4: Next AOC Expiry — ISO date string formatted to "MMM d, yyyy". */}
             <Card className="shadow-sm">
               <CardHeader className="flex flex-row items-center justify-between pb-2">
                 <CardTitle className="text-sm font-medium text-muted-foreground">Next AOC Expiry</CardTitle>
@@ -173,6 +221,8 @@ export default function Dashboard() {
               </CardHeader>
               <CardContent>
                 <div className="text-3xl font-bold font-mono text-base">
+                  {/* `format` from date-fns converts ISO string to human-readable date.
+                      Falls back to "N/A" when no AOC date is available for the entity. */}
                   {summary?.nextAocDate ? format(new Date(summary.nextAocDate), 'MMM d, yyyy') : 'N/A'}
                 </div>
                 <p className="text-xs text-muted-foreground mt-1">PCI DSS Level 1</p>
@@ -183,10 +233,12 @@ export default function Dashboard() {
       </div>
 
       {/* ------------------------------------------------------------------ */}
-      {/* Lower section: Coverage chart (2/3 width) + right sidebar (1/3)    */}
+      {/* Lower section: 2/3 + 1/3 two-column grid                           */}
+      {/* On lg+: Coverage takes 2/3 of width, sidebar 1/3.                  */}
+      {/* On smaller screens: stacks vertically.                              */}
       {/* ------------------------------------------------------------------ */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* PCI DSS Requirement Coverage — progress bars per requirement */}
+        {/* PCI DSS Requirement Coverage progress bars — occupies 2/3 of the row */}
         <Card className="lg:col-span-2 shadow-sm">
           <CardHeader>
             <CardTitle className="text-base font-semibold">Requirement Coverage (PCI DSS)</CardTitle>
@@ -194,6 +246,7 @@ export default function Dashboard() {
           </CardHeader>
           <CardContent>
             {isLoadingCoverage ? (
+              /* 12 rows matches the number of PCI DSS principal requirements. */
               <ProgressRowSkeleton rows={12} />
             ) : isErrorCoverage ? (
               <QueryError error={errorCoverage} onRetry={refetchCoverage} />
@@ -202,12 +255,15 @@ export default function Dashboard() {
                 {coverage?.map((req) => (
                   <div key={req.requirementId} className="space-y-1.5">
                     <div className="flex justify-between text-xs font-medium">
-                      {/* Monospace requirement ID (e.g. "REQ-1") */}
+                      {/* Monospace requirement ID (e.g. "REQ-1") for alignment. */}
                       <span className="font-mono text-muted-foreground mr-2">{req.requirementId}</span>
+                      {/* Requirement name truncated with `flex-1 truncate` so the
+                          percentage value always aligns to the right. */}
                       <span className="flex-1 truncate pr-4">{req.requirementName}</span>
+                      {/* Percentage value in monospace for consistent column alignment. */}
                       <span className="font-mono">{req.pct}%</span>
                     </div>
-                    {/* Native progress bar; value drives CSS width. */}
+                    {/* Radix UI Progress bar; `value` drives the CSS fill width. */}
                     <Progress value={req.pct} className="h-2" />
                   </div>
                 ))}
@@ -216,7 +272,7 @@ export default function Dashboard() {
           </CardContent>
         </Card>
 
-        {/* Right sidebar: Milestones + Recent Activity stacked vertically */}
+        {/* Right sidebar: Milestones and Recent Activity stacked vertically */}
         <div className="space-y-6">
           {/* Upcoming Milestones card */}
           <Card className="shadow-sm">
@@ -225,7 +281,8 @@ export default function Dashboard() {
             </CardHeader>
             <CardContent>
               {isLoadingMilestones ? (
-                /* Inline skeleton matching the 3-item date-card layout. */
+                /* Inline skeleton closely mirrors the date-card layout:
+                   a small square date badge (w-10 h-10) + two text lines + a badge. */
                 <div className="space-y-4">
                   {Array.from({ length: 3 }).map((_, i) => (
                     <div key={i} className="flex gap-3">
@@ -245,7 +302,9 @@ export default function Dashboard() {
                   {milestones?.length === 0 && <p className="text-sm text-muted-foreground">No upcoming milestones.</p>}
                   {milestones?.map((milestone) => (
                     <div key={milestone.id} className="flex gap-3 border-b border-border/50 pb-3 last:border-0 last:pb-0">
-                      {/* Date badge: month abbreviation + day number */}
+                      {/* Date badge: two-line widget showing abbreviated month + numeric day.
+                          Uses `format(date, 'MMM')` for the month (e.g. "Jan") and
+                          `format(date, 'dd')` for the zero-padded day (e.g. "05"). */}
                       <div className="w-10 h-10 rounded bg-muted/50 flex flex-col items-center justify-center flex-shrink-0 border border-border/50">
                         <span className="text-[10px] font-semibold text-muted-foreground uppercase">{format(new Date(milestone.dueDate), 'MMM')}</span>
                         <span className="text-sm font-bold font-mono leading-none">{format(new Date(milestone.dueDate), 'dd')}</span>
@@ -253,7 +312,9 @@ export default function Dashboard() {
                       <div>
                         <h4 className="text-sm font-medium leading-none mb-1">{milestone.title}</h4>
                         <p className="text-xs text-muted-foreground mb-1">{milestone.description}</p>
-                        {/* Priority badge: destructive for critical, secondary for others */}
+                        {/* Priority badge:
+                            - "critical" → `variant="destructive"` (red)
+                            - all others → `variant="secondary"` (muted grey) */}
                         <Badge variant={milestone.priority === 'critical' ? 'destructive' : 'secondary'} className="text-[10px] py-0 px-1.5 font-mono">
                           {milestone.priority}
                         </Badge>
@@ -272,27 +333,34 @@ export default function Dashboard() {
             </CardHeader>
             <CardContent>
               {isLoadingActivity ? (
+                /* 4 skeleton rows to approximate the 5 fetched items (accounting
+                   for varying content lengths the fifth may or may not appear). */
                 <ListItemSkeleton rows={4} />
               ) : isErrorActivity ? (
                 <QueryError error={errorActivity} onRetry={refetchActivity} />
               ) : (
-                /* Vertical timeline: the `before:` pseudo-element draws the  */
-                /* connecting line between activity nodes.                     */
+                /* Vertical timeline layout:
+                   - The `before:` pseudo-element on the container div draws a
+                     thin gradient vertical line connecting the activity nodes.
+                   - Each node has a small dot (the `w-1.5 h-1.5 rounded-full`).
+                   - On md+ the timeline centres and alternates sides. */
                 <div className="space-y-4 relative before:absolute before:inset-0 before:ml-2.5 before:-translate-x-px md:before:mx-auto md:before:translate-x-0 before:h-full before:w-0.5 before:bg-gradient-to-b before:from-transparent before:via-border before:to-transparent">
                   {activities?.map((activity) => (
                     <div key={activity.id} className="relative flex items-center justify-between md:justify-normal md:odd:flex-row-reverse group is-active">
-                      {/* Timeline node dot */}
+                      {/* Timeline node: small bordered circle with an inner dot. */}
                       <div className="flex items-center justify-center w-5 h-5 rounded-full border border-background bg-muted-foreground/20 shrink-0 md:order-1 md:group-odd:-translate-x-1/2 md:group-even:translate-x-1/2 shadow-sm">
                         <div className="w-1.5 h-1.5 rounded-full bg-muted-foreground" />
                       </div>
                       <div className="w-[calc(100%-2rem)] md:w-[calc(50%-1.5rem)] flex flex-col text-sm">
                         <div className="flex items-center gap-1.5 text-xs text-muted-foreground mb-0.5">
+                          {/* Actor name in full foreground colour for visual hierarchy. */}
                           <span className="font-medium text-foreground">{activity.actor}</span>
                           <span>{activity.action}</span>
                         </div>
-                        {/* Target entity rendered in a monospace chip */}
+                        {/* Target entity in a monospace chip for easy identification. */}
                         <span className="font-mono text-xs truncate bg-muted/30 px-1 py-0.5 rounded text-foreground w-fit">{activity.target}</span>
-                        {/* Relative timestamp: e.g. "3 minutes ago" */}
+                        {/* Relative timestamp using `date-fns formatDistanceToNow`:
+                            e.g. "3 minutes ago", "about 2 hours ago". */}
                         <time className="text-[10px] text-muted-foreground mt-1">
                           {formatDistanceToNow(new Date(activity.createdAt), { addSuffix: true })}
                         </time>
