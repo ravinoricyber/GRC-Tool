@@ -5,11 +5,13 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { ShieldCheck, Building2, Server, Key } from 'lucide-react';
+import { QueryError, FormSkeleton } from '@/components/query-states';
+import { Skeleton } from '@/components/ui/skeleton';
 
 export default function Settings() {
   const { activeEntity } = useEntity();
   
-  const { data: entityObj, isLoading } = useGetEntity(activeEntity, {
+  const { data: entityObj, isLoading, isError, error, refetch } = useGetEntity(activeEntity, {
     query: { enabled: !!activeEntity, queryKey: getGetEntityQueryKey(activeEntity) }
   });
 
@@ -39,57 +41,77 @@ export default function Settings() {
 
         {/* Content */}
         <div className="md:col-span-3 space-y-6">
-          <Card className="shadow-sm">
-            <CardHeader>
-              <CardTitle>Entity Profile</CardTitle>
-              <CardDescription>Manage legal details and metadata for {entityObj?.name || 'this entity'}.</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">Entity Name</label>
-                  <Input defaultValue={entityObj?.name || ''} disabled className="bg-muted/50" />
-                </div>
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">Entity Code</label>
-                  <Input defaultValue={entityObj?.code || ''} disabled className="bg-muted/50 font-mono" />
-                </div>
-                <div className="space-y-2 col-span-2">
-                  <label className="text-sm font-medium">Legal Name</label>
-                  <Input defaultValue={entityObj?.legalName || ''} />
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+          {isError ? (
+            <QueryError error={error} onRetry={refetch} className="rounded-lg border bg-card" />
+          ) : (
+            <>
+              <Card className="shadow-sm">
+                <CardHeader>
+                  <CardTitle>Entity Profile</CardTitle>
+                  <CardDescription>
+                    {isLoading
+                      ? <Skeleton className="h-4 w-56 mt-1" />
+                      : `Manage legal details and metadata for ${entityObj?.name || 'this entity'}.`}
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {isLoading ? (
+                    <FormSkeleton fields={3} />
+                  ) : (
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <label className="text-sm font-medium">Entity Name</label>
+                        <Input defaultValue={entityObj?.name || ''} disabled className="bg-muted/50" />
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-sm font-medium">Entity Code</label>
+                        <Input defaultValue={entityObj?.code || ''} disabled className="bg-muted/50 font-mono" />
+                      </div>
+                      <div className="space-y-2 col-span-2">
+                        <label className="text-sm font-medium">Legal Name</label>
+                        <Input defaultValue={entityObj?.legalName || ''} />
+                      </div>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
 
-          <Card className="shadow-sm">
-            <CardHeader>
-              <CardTitle>PCI DSS Configuration</CardTitle>
-              <CardDescription>Specific details for PCI DSS assessment scope.</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">Merchant Level</label>
-                  <Input defaultValue={entityObj?.merchantLevel || ''} />
-                </div>
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">SAQ Type (if applicable)</label>
-                  <Input defaultValue={entityObj?.saqType || ''} />
-                </div>
-                <div className="space-y-2 col-span-2">
-                  <label className="text-sm font-medium">CDE Scope Definition</label>
-                  <textarea 
-                    className="flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-                    defaultValue={entityObj?.cdeScope || ''}
-                  />
-                </div>
-              </div>
-              <div className="flex justify-end pt-4">
-                <Button>Save Changes</Button>
-              </div>
-            </CardContent>
-          </Card>
+              <Card className="shadow-sm">
+                <CardHeader>
+                  <CardTitle>PCI DSS Configuration</CardTitle>
+                  <CardDescription>Specific details for PCI DSS assessment scope.</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {isLoading ? (
+                    <FormSkeleton fields={4} />
+                  ) : (
+                    <>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                          <label className="text-sm font-medium">Merchant Level</label>
+                          <Input defaultValue={entityObj?.merchantLevel || ''} />
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-sm font-medium">SAQ Type (if applicable)</label>
+                          <Input defaultValue={entityObj?.saqType || ''} />
+                        </div>
+                        <div className="space-y-2 col-span-2">
+                          <label className="text-sm font-medium">CDE Scope Definition</label>
+                          <textarea 
+                            className="flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                            defaultValue={entityObj?.cdeScope || ''}
+                          />
+                        </div>
+                      </div>
+                      <div className="flex justify-end pt-4">
+                        <Button>Save Changes</Button>
+                      </div>
+                    </>
+                  )}
+                </CardContent>
+              </Card>
+            </>
+          )}
         </div>
       </div>
     </div>

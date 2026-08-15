@@ -4,15 +4,15 @@ import { useListEvidence, getListEvidenceQueryKey } from '@workspace/api-client-
 import { format } from 'date-fns';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Search, Filter, SlidersHorizontal, AlertCircle } from 'lucide-react';
+import { Filter, SlidersHorizontal, AlertCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { QueryError, TableBodySkeleton } from '@/components/query-states';
 
 export default function Evidence() {
   const { activeEntity } = useEntity();
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
 
-  const { data: evidenceList, isLoading } = useListEvidence(
+  const { data: evidenceList, isLoading, isError, error, refetch } = useListEvidence(
     { entityCode: activeEntity, status: statusFilter },
     { query: { queryKey: getListEvidenceQueryKey({ entityCode: activeEntity, status: statusFilter }) } }
   );
@@ -97,48 +97,56 @@ export default function Evidence() {
               </tr>
             </thead>
             <tbody>
-              {evidenceList?.map((req) => (
-                <tr key={req.id} className="group cursor-pointer">
-                  <td className="font-mono text-xs">{req.code}</td>
-                  <td className="font-mono text-xs">{req.controlRef}</td>
-                  <td>
-                    <Badge variant="outline" className="font-mono text-[10px] bg-background">
-                      {req.frameworkCode}
-                    </Badge>
-                  </td>
-                  <td className="font-medium group-hover:text-primary transition-colors">
-                    {req.title}
-                  </td>
-                  <td className="text-muted-foreground">{req.assignee || 'Unassigned'}</td>
-                  <td>
-                    <span className={cn("px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider border", getPriorityColor(req.priority))}>
-                      {req.priority}
-                    </span>
-                  </td>
-                  <td className={cn(
-                    "font-mono text-xs", 
-                    req.dueDate && new Date(req.dueDate) < new Date() && req.status !== 'approved' && req.status !== 'submitted' 
-                      ? "text-destructive font-bold flex items-center gap-1.5" 
-                      : ""
-                  )}>
-                    {req.dueDate && new Date(req.dueDate) < new Date() && req.status !== 'approved' && req.status !== 'submitted' && (
-                      <AlertCircle className="h-3 w-3" />
-                    )}
-                    {req.dueDate ? format(new Date(req.dueDate), 'MMM d, yyyy') : '-'}
-                  </td>
-                  <td>
-                    <Badge className={cn("text-[10px] uppercase font-bold tracking-wider text-white border-transparent", getStatusColor(req.status))}>
-                      {req.status.replace('-', ' ')}
-                    </Badge>
-                  </td>
-                </tr>
-              ))}
-              {evidenceList?.length === 0 && (
-                <tr>
-                  <td colSpan={8} className="text-center py-12 text-muted-foreground">
-                    No evidence requests found.
-                  </td>
-                </tr>
+              {isLoading ? (
+                <TableBodySkeleton columns={8} rows={10} />
+              ) : isError ? (
+                <QueryError error={error} onRetry={refetch} asTableRow colSpan={8} />
+              ) : (
+                <>
+                  {evidenceList?.map((req) => (
+                    <tr key={req.id} className="group cursor-pointer">
+                      <td className="font-mono text-xs">{req.code}</td>
+                      <td className="font-mono text-xs">{req.controlRef}</td>
+                      <td>
+                        <Badge variant="outline" className="font-mono text-[10px] bg-background">
+                          {req.frameworkCode}
+                        </Badge>
+                      </td>
+                      <td className="font-medium group-hover:text-primary transition-colors">
+                        {req.title}
+                      </td>
+                      <td className="text-muted-foreground">{req.assignee || 'Unassigned'}</td>
+                      <td>
+                        <span className={cn("px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider border", getPriorityColor(req.priority))}>
+                          {req.priority}
+                        </span>
+                      </td>
+                      <td className={cn(
+                        "font-mono text-xs", 
+                        req.dueDate && new Date(req.dueDate) < new Date() && req.status !== 'approved' && req.status !== 'submitted' 
+                          ? "text-destructive font-bold flex items-center gap-1.5" 
+                          : ""
+                      )}>
+                        {req.dueDate && new Date(req.dueDate) < new Date() && req.status !== 'approved' && req.status !== 'submitted' && (
+                          <AlertCircle className="h-3 w-3" />
+                        )}
+                        {req.dueDate ? format(new Date(req.dueDate), 'MMM d, yyyy') : '-'}
+                      </td>
+                      <td>
+                        <Badge className={cn("text-[10px] uppercase font-bold tracking-wider text-white border-transparent", getStatusColor(req.status))}>
+                          {req.status.replace('-', ' ')}
+                        </Badge>
+                      </td>
+                    </tr>
+                  ))}
+                  {evidenceList?.length === 0 && (
+                    <tr>
+                      <td colSpan={8} className="text-center py-12 text-muted-foreground">
+                        No evidence requests found.
+                      </td>
+                    </tr>
+                  )}
+                </>
               )}
             </tbody>
           </table>

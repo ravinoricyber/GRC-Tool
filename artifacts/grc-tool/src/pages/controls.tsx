@@ -5,11 +5,12 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { FileText, Search, SlidersHorizontal, Download } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { QueryError, TableBodySkeleton } from '@/components/query-states';
 
 export default function Controls() {
   const { activeEntity } = useEntity();
   
-  const { data: controls, isLoading } = useListControls(
+  const { data: controls, isLoading, isError, error, refetch } = useListControls(
     { entityCode: activeEntity },
     { query: { queryKey: getListControlsQueryKey({ entityCode: activeEntity }) } }
   );
@@ -72,41 +73,49 @@ export default function Controls() {
               </tr>
             </thead>
             <tbody className="bg-card">
-              {controls?.map((control) => (
-                <tr key={control.id} className="group cursor-pointer hover:bg-muted/20 border-b border-border/50 last:border-0">
-                  <td className="font-mono font-medium text-xs text-foreground whitespace-nowrap align-top py-3">
-                    {control.ref}
-                  </td>
-                  <td className="align-top py-3">
-                    <Badge variant="outline" className="font-mono text-[10px] bg-background shrink-0">
-                      {control.frameworkCode}
-                    </Badge>
-                  </td>
-                  <td className="align-top py-3 text-muted-foreground text-xs">
-                    {control.domainNumber}. {control.domain.substring(0, 15)}...
-                  </td>
-                  <td className="align-top py-3">
-                    <div className="font-medium mb-1 leading-snug group-hover:text-primary transition-colors">{control.title}</div>
-                    <div className="text-xs text-muted-foreground line-clamp-1">{control.description}</div>
-                  </td>
-                  <td className="align-top py-3">
-                    <Badge className={cn("text-[10px] uppercase font-bold tracking-wider border-transparent shadow-none w-28 justify-center", getFindingColor(control.finding))}>
-                      {formatFindingLabel(control.finding)}
-                    </Badge>
-                  </td>
-                  <td className="text-right align-top py-3">
-                     <Button variant="ghost" size="icon" className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity">
-                       <FileText className="h-4 w-4 text-muted-foreground" />
-                     </Button>
-                  </td>
-                </tr>
-              ))}
-              {controls?.length === 0 && (
-                <tr>
-                  <td colSpan={6} className="text-center py-12 text-muted-foreground">
-                    No controls found.
-                  </td>
-                </tr>
+              {isLoading ? (
+                <TableBodySkeleton columns={6} rows={12} />
+              ) : isError ? (
+                <QueryError error={error} onRetry={refetch} asTableRow colSpan={6} />
+              ) : (
+                <>
+                  {controls?.map((control) => (
+                    <tr key={control.id} className="group cursor-pointer hover:bg-muted/20 border-b border-border/50 last:border-0">
+                      <td className="font-mono font-medium text-xs text-foreground whitespace-nowrap align-top py-3">
+                        {control.ref}
+                      </td>
+                      <td className="align-top py-3">
+                        <Badge variant="outline" className="font-mono text-[10px] bg-background shrink-0">
+                          {control.frameworkCode}
+                        </Badge>
+                      </td>
+                      <td className="align-top py-3 text-muted-foreground text-xs">
+                        {control.domainNumber}. {control.domain.substring(0, 15)}...
+                      </td>
+                      <td className="align-top py-3">
+                        <div className="font-medium mb-1 leading-snug group-hover:text-primary transition-colors">{control.title}</div>
+                        <div className="text-xs text-muted-foreground line-clamp-1">{control.description}</div>
+                      </td>
+                      <td className="align-top py-3">
+                        <Badge className={cn("text-[10px] uppercase font-bold tracking-wider border-transparent shadow-none w-28 justify-center", getFindingColor(control.finding))}>
+                          {formatFindingLabel(control.finding)}
+                        </Badge>
+                      </td>
+                      <td className="text-right align-top py-3">
+                         <Button variant="ghost" size="icon" className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity">
+                           <FileText className="h-4 w-4 text-muted-foreground" />
+                         </Button>
+                      </td>
+                    </tr>
+                  ))}
+                  {controls?.length === 0 && (
+                    <tr>
+                      <td colSpan={6} className="text-center py-12 text-muted-foreground">
+                        No controls found.
+                      </td>
+                    </tr>
+                  )}
+                </>
               )}
             </tbody>
           </table>

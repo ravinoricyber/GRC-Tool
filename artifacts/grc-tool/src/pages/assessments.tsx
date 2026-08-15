@@ -7,11 +7,12 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { PlayCircle, CheckCircle2, CircleDashed, ClipboardEdit, Plus } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { QueryError, CardGridSkeleton } from '@/components/query-states';
 
 export default function Assessments() {
   const { activeEntity } = useEntity();
   
-  const { data: assessments, isLoading } = useListAssessments(
+  const { data: assessments, isLoading, isError, error, refetch } = useListAssessments(
     { entityCode: activeEntity },
     { query: { queryKey: getListAssessmentsQueryKey({ entityCode: activeEntity }) } }
   );
@@ -38,62 +39,95 @@ export default function Assessments() {
         </Button>
       </div>
 
-      <div className="space-y-4">
-        {assessments?.map((assessment) => (
-          <Card key={assessment.id} className="shadow-sm hover:border-primary/50 transition-colors group cursor-pointer overflow-hidden">
-            <div className="flex flex-col md:flex-row md:items-stretch">
-              {/* Left col - Status color strip */}
-              <div className={cn(
-                "w-full md:w-2 shrink-0", 
-                assessment.status === 'planning' ? "bg-slate-300" :
-                assessment.status === 'fieldwork' ? "bg-blue-500" :
-                assessment.status === 'reporting' ? "bg-violet-500" : "bg-emerald-500"
-              )} />
-              
-              <CardContent className="flex-1 p-6 flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
-                <div className="flex items-start gap-4">
-                  <div className="mt-1">
-                    {getStatusIcon(assessment.status)}
+      {isLoading ? (
+        <div className="space-y-4">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <div key={i} className="rounded-lg border bg-card shadow-sm overflow-hidden">
+              <div className="flex">
+                <div className="w-2 bg-muted shrink-0" />
+                <div className="flex-1 p-6 flex items-center justify-between gap-6">
+                  <div className="flex items-start gap-4 flex-1">
+                    <div className="w-5 h-5 rounded-full bg-muted mt-1 shrink-0" />
+                    <div className="flex-1 space-y-2">
+                      <div className="h-5 w-1/2 bg-muted rounded animate-pulse" />
+                      <div className="h-4 w-1/3 bg-muted rounded animate-pulse" />
+                    </div>
                   </div>
-                  <div>
-                    <h3 className="text-lg font-bold mb-1 group-hover:text-primary transition-colors">{assessment.name}</h3>
-                    <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-                      <Badge variant="outline" className="font-mono text-[10px] bg-background">
-                        {assessment.frameworkCode}
-                      </Badge>
-                      <span>&bull;</span>
-                      <span className="font-medium">{assessment.qsaCompany || 'Internal Assessor'}</span>
-                      <span>&bull;</span>
-                      <span>Lead: {assessment.leadAssessor || 'Unassigned'}</span>
+                  <div className="flex gap-8">
+                    <div className="space-y-1">
+                      <div className="h-3 w-12 bg-muted rounded animate-pulse" />
+                      <div className="h-4 w-24 bg-muted rounded animate-pulse" />
+                    </div>
+                    <div className="space-y-1">
+                      <div className="h-3 w-12 bg-muted rounded animate-pulse" />
+                      <div className="h-4 w-16 bg-muted rounded animate-pulse" />
                     </div>
                   </div>
                 </div>
-
-                <div className="flex items-center gap-8 text-sm">
-                  <div className="flex flex-col">
-                    <span className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider mb-1">Timeline</span>
-                    <span className="font-mono">
-                      {assessment.plannedStart ? format(new Date(assessment.plannedStart), 'MMM yyyy') : 'TBD'} &rarr; {assessment.plannedEnd ? format(new Date(assessment.plannedEnd), 'MMM yyyy') : 'TBD'}
-                    </span>
-                  </div>
-                  
-                  <div className="flex flex-col items-end">
-                    <span className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider mb-1">Status</span>
-                    <Badge variant="secondary" className="uppercase text-[10px] tracking-wider shadow-none">
-                      {assessment.status}
-                    </Badge>
-                  </div>
-                </div>
-              </CardContent>
+              </div>
             </div>
-          </Card>
-        ))}
-        {assessments?.length === 0 && (
-          <div className="text-center py-12 text-muted-foreground border border-dashed rounded-lg bg-card">
-            No assessment engagements found.
-          </div>
-        )}
-      </div>
+          ))}
+        </div>
+      ) : isError ? (
+        <QueryError error={error} onRetry={refetch} className="rounded-lg border bg-card" />
+      ) : (
+        <div className="space-y-4">
+          {assessments?.map((assessment) => (
+            <Card key={assessment.id} className="shadow-sm hover:border-primary/50 transition-colors group cursor-pointer overflow-hidden">
+              <div className="flex flex-col md:flex-row md:items-stretch">
+                {/* Left col - Status color strip */}
+                <div className={cn(
+                  "w-full md:w-2 shrink-0", 
+                  assessment.status === 'planning' ? "bg-slate-300" :
+                  assessment.status === 'fieldwork' ? "bg-blue-500" :
+                  assessment.status === 'reporting' ? "bg-violet-500" : "bg-emerald-500"
+                )} />
+                
+                <CardContent className="flex-1 p-6 flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
+                  <div className="flex items-start gap-4">
+                    <div className="mt-1">
+                      {getStatusIcon(assessment.status)}
+                    </div>
+                    <div>
+                      <h3 className="text-lg font-bold mb-1 group-hover:text-primary transition-colors">{assessment.name}</h3>
+                      <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+                        <Badge variant="outline" className="font-mono text-[10px] bg-background">
+                          {assessment.frameworkCode}
+                        </Badge>
+                        <span>&bull;</span>
+                        <span className="font-medium">{assessment.qsaCompany || 'Internal Assessor'}</span>
+                        <span>&bull;</span>
+                        <span>Lead: {assessment.leadAssessor || 'Unassigned'}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-8 text-sm">
+                    <div className="flex flex-col">
+                      <span className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider mb-1">Timeline</span>
+                      <span className="font-mono">
+                        {assessment.plannedStart ? format(new Date(assessment.plannedStart), 'MMM yyyy') : 'TBD'} &rarr; {assessment.plannedEnd ? format(new Date(assessment.plannedEnd), 'MMM yyyy') : 'TBD'}
+                      </span>
+                    </div>
+                    
+                    <div className="flex flex-col items-end">
+                      <span className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider mb-1">Status</span>
+                      <Badge variant="secondary" className="uppercase text-[10px] tracking-wider shadow-none">
+                        {assessment.status}
+                      </Badge>
+                    </div>
+                  </div>
+                </CardContent>
+              </div>
+            </Card>
+          ))}
+          {assessments?.length === 0 && (
+            <div className="text-center py-12 text-muted-foreground border border-dashed rounded-lg bg-card">
+              No assessment engagements found.
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
