@@ -33,6 +33,12 @@ export interface EvidenceRequest {
   requestedBy?: string | null;
   /** @nullable */
   dueDate?: string | null;
+  /** @nullable */
+  notes?: string | null;
+  /** @nullable */
+  fileName?: string | null;
+  /** @nullable */
+  fileUrl?: string | null;
   requestedAt: string;
   /** @nullable */
   approvedAt?: string | null;

@@ -225,6 +225,34 @@ export const evidenceRequestsTable = pgTable("evidence_requests", {
   dueDate: text("due_date"), // YYYY-MM-DD
 
   /**
+   * Internal reviewer/auditor notes attached to the evidence request.
+   *
+   * - Constraints: nullable.
+   * - Used for observations, rejection reasons, or context added during review.
+   * - Updated via PATCH; each change is logged in the activity trail.
+   */
+  notes: text("notes"),
+
+  /**
+   * Original filename of the uploaded evidence artefact.
+   *
+   * - Constraints: nullable; null until a file is attached.
+   * - Stored for display in the UI without requiring a filesystem stat.
+   * - Example: `"Firewall_Rules_Q1_2026.pdf"`.
+   */
+  fileName: text("file_name"),
+
+  /**
+   * Server-relative URL path under which the uploaded file can be retrieved.
+   *
+   * - Constraints: nullable; null until a file is attached.
+   * - Format: `/api/evidence/<uuid>/file/<sanitised-filename>`.
+   * - The route validates this path against the evidence record before serving,
+   *   preventing path traversal attacks.
+   */
+  fileUrl: text("file_url"),
+
+  /**
    * Timestamp of when this evidence request was formally raised.
    *
    * - Constraints: not null, defaults to `now()` at insert time.

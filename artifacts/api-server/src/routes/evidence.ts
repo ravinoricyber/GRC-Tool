@@ -38,6 +38,8 @@ import {
   UpdateEvidenceBody,
   UpdateEvidenceResponse,
 } from "@workspace/api-zod";
+import path from "path";
+import fs from "fs";
 
 /**
  * Express sub-router that owns all `/evidence` routes.
@@ -208,6 +210,14 @@ router.get("/evidence/:id", async (req, res): Promise<void> => {
  */
 router.patch("/evidence/:id", async (req, res): Promise<void> => {
   const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+
+  // Fetch current record to detect status changes
+  const existing = await db.select().from(evidenceRequestsTable).where(eq(evidenceRequestsTable.id, id));
+  if (!existing[0]) {
+    res.status(404).json({ error: "Evidence request not found" });
+    return;
+  }
+
   const parsed = UpdateEvidenceBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });
@@ -231,7 +241,137 @@ router.patch("/evidence/:id", async (req, res): Promise<void> => {
     res.status(404).json({ error: "Evidence request not found" });
     return;
   }
+
+  // Log activity for status changes
+  if (parsed.data.status && parsed.data.status !== existing[0].status) {
+    await db.insert(activityLogTable).values({
+      id: crypto.randomUUID(),
+      entityCode: row.entityCode,
+      actor: "System",
+      action: `changed status from "${existing[0].status}" to "${parsed.data.status}"`,
+      target: `${row.code} · ${row.title}`,
+    });
+  }
+
+  // Log activity for notes updates
+  if (parsed.data.notes && parsed.data.notes !== existing[0].notes) {
+    await db.insert(activityLogTable).values({
+      id: crypto.randomUUID(),
+      entityCode: row.entityCode,
+      actor: "System",
+      action: "added notes to evidence request",
+      target: `${row.code} · ${row.title}`,
+    });
+  }
+
   res.json(UpdateEvidenceResponse.parse(serializeDates(row)));
+});
+
+/**
+ * POST /evidence/:id/upload
+ *
+ * Accepts a base64-encoded file payload (up to the 50 MB JSON body limit set
+ * in `app.ts`), writes it to the local uploads directory under a sanitised
+ * filename, and records the filename/URL on the evidence request row.
+ *
+ * The filename stored in the database is the *sanitised* server-generated name,
+ * not the raw client-supplied name, so the download route can safely look it up
+ * without trusting request parameters.
+ *
+ * @param req.body.fileName - Original filename (used for display only).
+ * @param req.body.fileData - Base64-encoded file content, optionally with a
+ *   `data:<mime>;base64,` prefix (stripped before writing).
+ */
+router.post("/evidence/:id/upload", async (req, res): Promise<void> => {
+  const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+
+  const existing = await db.select().from(evidenceRequestsTable).where(eq(evidenceRequestsTable.id, id));
+  if (!existing[0]) {
+    res.status(404).json({ error: "Evidence request not found" });
+    return;
+  }
+
+  const { fileName, fileData } = req.body as { fileName?: string; fileData?: string };
+  if (!fileName || !fileData) {
+    res.status(400).json({ error: "fileName and fileData (base64) are required" });
+    return;
+  }
+
+  // Store file to disk under a sanitised, ID-prefixed name
+  const uploadsDir = path.join(process.cwd(), "uploads", "evidence");
+  fs.mkdirSync(uploadsDir, { recursive: true });
+  const safeFileName = `${id}-${Date.now()}-${fileName.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
+  const filePath = path.join(uploadsDir, safeFileName);
+  const fileBuffer = Buffer.from(fileData.replace(/^data:[^;]+;base64,/, ""), "base64");
+  fs.writeFileSync(filePath, fileBuffer);
+
+  const fileUrl = `/api/evidence/${id}/file/${safeFileName}`;
+
+  const [row] = await db
+    .update(evidenceRequestsTable)
+    .set({ fileName, fileUrl })
+    .where(eq(evidenceRequestsTable.id, id))
+    .returning();
+
+  // Log activity
+  await db.insert(activityLogTable).values({
+    id: crypto.randomUUID(),
+    entityCode: row.entityCode,
+    actor: "System",
+    action: "uploaded evidence file",
+    target: `${row.code} · ${fileName}`,
+  });
+
+  res.json(GetEvidenceResponse.parse(serializeDates(row)));
+});
+
+/**
+ * GET /evidence/:id/file/:filename
+ *
+ * Serves the uploaded evidence file. The file path is resolved exclusively from
+ * the evidence record stored in the database — the `:filename` route parameter
+ * is validated against the DB-stored value and must match exactly. This prevents
+ * path traversal attacks: a caller cannot request an arbitrary filename; only the
+ * filename the server chose at upload time is accepted.
+ *
+ * Additional safeguards:
+ * - `path.resolve` is used so encoded traversal segments (e.g. `%2F..%2F`) are
+ *   normalised before the prefix check.
+ * - The resolved path is verified to be within the uploads root directory.
+ * - The file must belong to the evidence request identified by `:id`.
+ */
+router.get("/evidence/:id/file/:filename", async (req, res): Promise<void> => {
+  const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+  const requestedFilename = Array.isArray(req.params.filename) ? req.params.filename[0] : req.params.filename;
+
+  // Look up the evidence record to get the authoritative stored filename
+  const rows = await db.select().from(evidenceRequestsTable).where(eq(evidenceRequestsTable.id, id));
+  if (!rows[0] || !rows[0].fileUrl) {
+    res.status(404).json({ error: "File not found" });
+    return;
+  }
+
+  // Extract the basename of the stored filename from the DB record
+  const storedFilename = path.basename(rows[0].fileUrl.split("/").pop() ?? "");
+  if (!storedFilename || storedFilename !== requestedFilename) {
+    res.status(403).json({ error: "Forbidden" });
+    return;
+  }
+
+  const uploadsRoot = path.resolve(process.cwd(), "uploads", "evidence");
+  const filePath = path.resolve(uploadsRoot, storedFilename);
+
+  // Ensure the resolved path stays within the uploads directory
+  if (!filePath.startsWith(uploadsRoot + path.sep) && filePath !== uploadsRoot) {
+    res.status(403).json({ error: "Forbidden" });
+    return;
+  }
+
+  if (!fs.existsSync(filePath)) {
+    res.status(404).json({ error: "File not found" });
+    return;
+  }
+  res.sendFile(filePath);
 });
 
 /**

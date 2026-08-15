@@ -78,13 +78,13 @@ app.use(
 // Allow cross-origin requests from any origin (the front-end is served separately)
 app.use(cors());
 
-// Parse JSON request bodies (required for POST/PATCH routes)
-app.use(express.json());
+// Parse JSON request bodies. Limit raised to 50 MB to accommodate base64-encoded
+// evidence file uploads sent as JSON payloads by the upload endpoint.
+app.use(express.json({ limit: "50mb" }));
 
 // Also parse URL-encoded bodies for form submissions
-app.use(express.urlencoded({ extended: true }));
+app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 
 // All API routes are namespaced under /api to distinguish them from the UI
 app.use("/api", router);
-
 export default app;

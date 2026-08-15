@@ -221,6 +221,12 @@ export interface EvidenceRequest {
   requestedBy?: string | null;
   /** @nullable */
   dueDate?: string | null;
+  /** @nullable */
+  notes?: string | null;
+  /** @nullable */
+  fileName?: string | null;
+  /** @nullable */
+  fileUrl?: string | null;
   requestedAt: string;
   /** @nullable */
   approvedAt?: string | null;
@@ -251,6 +257,12 @@ export interface EvidenceInput {
   assessmentId?: string;
 }
 
+export interface EvidenceFileUpload {
+  fileName: string;
+  /** Base64-encoded file content */
+  fileData: string;
+}
+
 export type EvidenceUpdateStatus = typeof EvidenceUpdateStatus[keyof typeof EvidenceUpdateStatus];
 
 
@@ -279,6 +291,9 @@ export interface EvidenceUpdate {
   dueDate?: string;
   description?: string;
   title?: string;
+  notes?: string;
+  fileName?: string;
+  fileUrl?: string;
 }
 
 export type PolicyStatus = typeof PolicyStatus[keyof typeof PolicyStatus];

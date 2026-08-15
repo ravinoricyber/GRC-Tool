@@ -31,6 +31,7 @@ import type {
   ControlUpdate,
   DashboardSummary,
   Entity,
+  EvidenceFileUpload,
   EvidenceInput,
   EvidenceRequest,
   EvidenceUpdate,
@@ -1221,6 +1222,78 @@ export const useDeleteEvidence = <TError = ErrorType<unknown>,
         TContext
       > => {
       return useMutation(getDeleteEvidenceMutationOptions(options));
+    }
+
+export const getUploadEvidenceFileUrl = (id: string,) => {
+
+
+
+
+  return `/api/evidence/${id}/upload`
+}
+
+/**
+ * @summary Upload a file for an evidence request
+ */
+export const uploadEvidenceFile = async (id: string,
+    evidenceFileUpload: EvidenceFileUpload, options?: Parameters<typeof customFetch>[1]): Promise<EvidenceRequest> => {
+
+  return customFetch<EvidenceRequest>(getUploadEvidenceFileUrl(id),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(evidenceFileUpload)
+  }
+);}
+
+
+
+
+
+export const getUploadEvidenceFileMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof uploadEvidenceFile>>, TError,{id: string;data: BodyType<EvidenceFileUpload>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof uploadEvidenceFile>>, TError,{id: string;data: BodyType<EvidenceFileUpload>}, TContext> => {
+
+const mutationKey = ['uploadEvidenceFile'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof uploadEvidenceFile>>, {id: string;data: BodyType<EvidenceFileUpload>}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  uploadEvidenceFile(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UploadEvidenceFileMutationResult = NonNullable<Awaited<ReturnType<typeof uploadEvidenceFile>>>
+    export type UploadEvidenceFileMutationBody = BodyType<EvidenceFileUpload>
+    export type UploadEvidenceFileMutationError = ErrorType<void>
+
+    /**
+ * @summary Upload a file for an evidence request
+ */
+export const useUploadEvidenceFile = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof uploadEvidenceFile>>, TError,{id: string;data: BodyType<EvidenceFileUpload>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof uploadEvidenceFile>>,
+        TError,
+        {id: string;data: BodyType<EvidenceFileUpload>},
+        TContext
+      > => {
+      return useMutation(getUploadEvidenceFileMutationOptions(options));
     }
 
 export const getListPoliciesUrl = (params?: ListPoliciesParams,) => {

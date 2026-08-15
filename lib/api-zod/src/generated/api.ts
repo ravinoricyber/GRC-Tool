@@ -273,6 +273,9 @@ export const ListEvidenceResponseItem = zod.object({
   "assignee": zod.string().nullish(),
   "requestedBy": zod.string().nullish(),
   "dueDate": zod.string().nullish(),
+  "notes": zod.string().nullish(),
+  "fileName": zod.string().nullish(),
+  "fileUrl": zod.string().nullish(),
   "requestedAt": zod.string(),
   "approvedAt": zod.string().nullish(),
   "createdAt": zod.string()
@@ -314,6 +317,9 @@ export const CreateEvidenceResponse = zod.object({
   "assignee": zod.string().nullish(),
   "requestedBy": zod.string().nullish(),
   "dueDate": zod.string().nullish(),
+  "notes": zod.string().nullish(),
+  "fileName": zod.string().nullish(),
+  "fileUrl": zod.string().nullish(),
   "requestedAt": zod.string(),
   "approvedAt": zod.string().nullish(),
   "createdAt": zod.string()
@@ -344,6 +350,9 @@ export const GetEvidenceResponse = zod.object({
   "assignee": zod.string().nullish(),
   "requestedBy": zod.string().nullish(),
   "dueDate": zod.string().nullish(),
+  "notes": zod.string().nullish(),
+  "fileName": zod.string().nullish(),
+  "fileUrl": zod.string().nullish(),
   "requestedAt": zod.string(),
   "approvedAt": zod.string().nullish(),
   "createdAt": zod.string()
@@ -363,7 +372,10 @@ export const UpdateEvidenceBody = zod.object({
   "assignee": zod.string().optional(),
   "dueDate": zod.string().optional(),
   "description": zod.string().optional(),
-  "title": zod.string().optional()
+  "title": zod.string().optional(),
+  "notes": zod.string().optional(),
+  "fileName": zod.string().optional(),
+  "fileUrl": zod.string().optional()
 })
 
 export const UpdateEvidenceResponse = zod.object({
@@ -383,6 +395,9 @@ export const UpdateEvidenceResponse = zod.object({
   "assignee": zod.string().nullish(),
   "requestedBy": zod.string().nullish(),
   "dueDate": zod.string().nullish(),
+  "notes": zod.string().nullish(),
+  "fileName": zod.string().nullish(),
+  "fileUrl": zod.string().nullish(),
   "requestedAt": zod.string(),
   "approvedAt": zod.string().nullish(),
   "createdAt": zod.string()
@@ -397,6 +412,44 @@ export const DeleteEvidenceParams = zod.object({
 })
 
 export const DeleteEvidenceResponse = zod.void()
+
+
+/**
+ * @summary Upload a file for an evidence request
+ */
+export const UploadEvidenceFileParams = zod.object({
+  "id": zod.coerce.string()
+})
+
+export const UploadEvidenceFileBody = zod.object({
+  "fileName": zod.string(),
+  "fileData": zod.string().describe('Base64-encoded file content')
+})
+
+export const UploadEvidenceFileResponse = zod.object({
+  "id": zod.string(),
+  "code": zod.string(),
+  "assessmentId": zod.string().nullish(),
+  "controlId": zod.string().nullish(),
+  "controlRef": zod.string(),
+  "controlName": zod.string().nullish(),
+  "frameworkCode": zod.string(),
+  "frameworkName": zod.string().nullish(),
+  "entityCode": zod.string(),
+  "title": zod.string(),
+  "description": zod.string().nullish(),
+  "status": zod.enum(['requested', 'in-progress', 'submitted', 'approved', 'rejected']),
+  "priority": zod.enum(['critical', 'high', 'medium', 'low']),
+  "assignee": zod.string().nullish(),
+  "requestedBy": zod.string().nullish(),
+  "dueDate": zod.string().nullish(),
+  "notes": zod.string().nullish(),
+  "fileName": zod.string().nullish(),
+  "fileUrl": zod.string().nullish(),
+  "requestedAt": zod.string(),
+  "approvedAt": zod.string().nullish(),
+  "createdAt": zod.string()
+})
 
 
 /**

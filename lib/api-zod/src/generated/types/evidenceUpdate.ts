@@ -15,4 +15,7 @@ export interface EvidenceUpdate {
   dueDate?: string;
   description?: string;
   title?: string;
+  notes?: string;
+  fileName?: string;
+  fileUrl?: string;
 }

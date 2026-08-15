@@ -25,6 +25,7 @@ export * from './controlUpdate';
 export * from './controlUpdateFinding';
 export * from './dashboardSummary';
 export * from './entity';
+export * from './evidenceFileUpload';
 export * from './evidenceInput';
 export * from './evidenceInputPriority';
 export * from './evidenceRequest';

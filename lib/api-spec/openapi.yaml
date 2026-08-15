@@ -355,6 +355,33 @@ paths:
         "204":
           description: Deleted
 
+  /evidence/{id}/upload:
+    post:
+      operationId: uploadEvidenceFile
+      tags: [evidence]
+      summary: Upload a file for an evidence request
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EvidenceFileUpload"
+      responses:
+        "200":
+          description: Updated evidence request with file info
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EvidenceRequest"
+        "404":
+          description: Not found
+
   # ─── POLICIES ───────────────────────────────────────────────────────────────
   /policies:
     get:
@@ -1043,6 +1070,12 @@ components:
           type: ["string", "null"]
         dueDate:
           type: ["string", "null"]
+        notes:
+          type: ["string", "null"]
+        fileName:
+          type: ["string", "null"]
+        fileUrl:
+          type: ["string", "null"]
         requestedAt:
           type: string
         approvedAt:
@@ -1078,6 +1111,16 @@ components:
         assessmentId:
           type: string
 
+    EvidenceFileUpload:
+      type: object
+      required: [fileName, fileData]
+      properties:
+        fileName:
+          type: string
+        fileData:
+          type: string
+          description: Base64-encoded file content
+
     EvidenceUpdate:
       type: object
       properties:
@@ -1094,6 +1137,12 @@ components:
         description:
           type: string
         title:
+          type: string
+        notes:
+          type: string
+        fileName:
+          type: string
+        fileUrl:
           type: string
 
     # ─── Policy ─────────────────────────────────────────────────────────────
