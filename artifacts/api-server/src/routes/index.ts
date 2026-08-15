@@ -1,3 +1,11 @@
+/**
+ * @file routes/index.ts
+ * @description Root API router. Assembles every feature-level sub-router into
+ * a single Express `IRouter` that `app.ts` mounts under the `/api` prefix.
+ * Adding a new feature router here is the only change required to register
+ * its routes with the application.
+ */
+
 import { Router, type IRouter } from "express";
 import healthRouter from "./health";
 import entitiesRouter from "./entities";
@@ -13,6 +21,7 @@ import dashboardRouter from "./dashboard";
 
 const router: IRouter = Router();
 
+// Each sub-router is responsible for its own path prefix and HTTP methods
 router.use(healthRouter);
 router.use(entitiesRouter);
 router.use(frameworksRouter);

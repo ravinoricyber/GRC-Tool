@@ -1,3 +1,24 @@
+/**
+ * @file Shell.tsx
+ * @description Persistent application chrome rendered on every route.
+ *
+ * The Shell is composed of three regions:
+ *   1. **Sidebar** – Fixed-width left panel containing the app logo, an entity
+ *      switcher (loaded via React Query), primary navigation links, a settings
+ *      link, and a static user avatar.
+ *   2. **Top Header** – Breadcrumb showing the active entity + current page, a
+ *      global search input, and a "New Action" CTA button.
+ *   3. **Page Content** – Scrollable main area where the active route renders.
+ *
+ * The entity switcher uses `useListEntities` to fetch available business
+ * entities from the API. While loading it shows a skeleton; on error it shows
+ * a tooltip-decorated error state with a retry button.
+ *
+ * Active-route highlighting compares `useLocation()` against each nav item's
+ * `href` using a prefix match (so `/frameworks/detail` still highlights the
+ * Frameworks item), with a special case for `/` to prevent it matching all routes.
+ */
+
 import React from 'react';
 import { Link, useLocation } from 'wouter';
 import { useEntity } from '@/context/EntityContext';
@@ -36,16 +57,31 @@ import {
 } from "@/components/ui/tooltip"
 import { Skeleton } from '@/components/ui/skeleton';
 
+/**
+ * Application shell component wrapping every page with the sidebar and header.
+ *
+ * @param children - The active page component rendered in the main content area.
+ */
 export function Shell({ children }: { children: React.ReactNode }) {
+  // Current pathname used to compute active nav-item highlighting.
   const [location] = useLocation();
+  // Active entity code and its setter from global context.
   const { activeEntity, setActiveEntity } = useEntity();
   
+  /**
+   * Fetch all available business entities for the entity switcher dropdown.
+   * Query key is fully qualified so React Query caches the result independently
+   * from any entity-scoped queries on individual pages.
+   */
   const { data: entities = [], isLoading: isLoadingEntities, isError: isErrorEntities, refetch: refetchEntities } = useListEntities(
     { query: { queryKey: getListEntitiesQueryKey() } }
   );
   
+  // Resolve the full entity object for the currently active entity code so we
+  // can show the human-readable name in the switcher button and breadcrumb.
   const currentEntityObj = entities.find(e => e.code === activeEntity);
 
+  /** Navigation items rendered in the sidebar. Order determines visual order. */
   const navItems = [
     { href: '/', icon: LayoutDashboard, label: 'Dashboard' },
     { href: '/frameworks', icon: Library, label: 'Frameworks' },
@@ -60,19 +96,29 @@ export function Shell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="flex h-screen overflow-hidden bg-background">
-      {/* Sidebar */}
+      {/* ------------------------------------------------------------------ */}
+      {/* Sidebar                                                              */}
+      {/* ------------------------------------------------------------------ */}
       <aside className="w-64 border-r border-sidebar-border bg-sidebar text-sidebar-foreground flex flex-col h-full flex-shrink-0">
+        {/* App logo / wordmark */}
         <div className="h-14 flex items-center px-4 border-b border-sidebar-border gap-2 text-sidebar-primary">
           <ShieldCheck className="h-6 w-6" />
           <span className="font-bold tracking-tight text-sidebar-foreground">Compliance OS</span>
         </div>
 
-        {/* Entity Switcher */}
+        {/* ---------------------------------------------------------------- */}
+        {/* Entity Switcher                                                   */}
+        {/* Three conditional render states: loading skeleton, error with    */}
+        {/* retry button, or a fully operational dropdown.                   */}
+        {/* ---------------------------------------------------------------- */}
         <div className="p-4 border-b border-sidebar-border">
           <div className="text-xs font-semibold text-sidebar-foreground/50 uppercase tracking-wider mb-2">Business Entity</div>
           {isLoadingEntities ? (
+            /* Show a placeholder while the entity list is being fetched. */
             <Skeleton className="h-9 w-full rounded-md" />
           ) : isErrorEntities ? (
+            /* API call failed: show a non-interactive error indicator with   */
+            /* a tooltip explaining the situation and a retry button.         */
             <div className="flex items-center gap-2">
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -96,12 +142,14 @@ export function Shell({ children }: { children: React.ReactNode }) {
               </Button>
             </div>
           ) : (
+            /* Entities loaded: render the dropdown switcher.                 */
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button 
                   variant="outline" 
                   className="w-full justify-between bg-sidebar-accent border-sidebar-accent hover:bg-sidebar-accent/80 hover:text-sidebar-foreground text-sidebar-foreground"
                 >
+                  {/* Display the full name if resolved, else fall back to the code. */}
                   <span className="truncate">{currentEntityObj?.name || activeEntity}</span>
                   <ChevronsUpDown className="h-4 w-4 opacity-50" />
                 </Button>
@@ -114,6 +162,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
                     className="flex items-center justify-between"
                   >
                     {entity.name}
+                    {/* Show a checkmark next to the currently active entity. */}
                     {activeEntity === entity.code && <Check className="h-4 w-4 text-primary" />}
                   </DropdownMenuItem>
                 ))}
@@ -122,10 +171,19 @@ export function Shell({ children }: { children: React.ReactNode }) {
           )}
         </div>
 
-        {/* Navigation */}
+        {/* ---------------------------------------------------------------- */}
+        {/* Primary Navigation                                                */}
+        {/* ---------------------------------------------------------------- */}
         <div className="flex-1 overflow-y-auto py-4">
           <nav className="space-y-1 px-2">
             {navItems.map((item) => {
+              /**
+               * Active state logic:
+               * - Exact match for the dashboard root `/` to avoid it matching
+               *   every route via prefix.
+               * - Prefix match for all other routes so nested paths (e.g.
+               *   `/evidence/123`) keep their parent item highlighted.
+               */
               const isActive = location === item.href || (item.href !== '/' && location.startsWith(item.href));
               return (
                 <Link
@@ -146,12 +204,15 @@ export function Shell({ children }: { children: React.ReactNode }) {
           </nav>
         </div>
 
-        {/* Settings & User */}
+        {/* ---------------------------------------------------------------- */}
+        {/* Settings link + User identity footer                             */}
+        {/* ---------------------------------------------------------------- */}
         <div className="p-4 border-t border-sidebar-border mt-auto">
           <Link href="/settings" className="flex items-center gap-3 px-3 py-2 text-sm font-medium rounded-md transition-colors text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground mb-4">
             <Settings className="h-4 w-4" />
             Settings
           </Link>
+          {/* Static user identity; would be replaced with real auth data. */}
           <div className="flex items-center gap-3 px-2">
             <Avatar className="h-9 w-9 border border-sidebar-border">
               <AvatarFallback className="bg-sidebar-accent text-sidebar-foreground text-xs">GR</AvatarFallback>
@@ -164,16 +225,20 @@ export function Shell({ children }: { children: React.ReactNode }) {
         </div>
       </aside>
 
-      {/* Main content */}
+      {/* ------------------------------------------------------------------ */}
+      {/* Main content area                                                    */}
+      {/* ------------------------------------------------------------------ */}
       <main className="flex-1 flex flex-col min-w-0 overflow-hidden">
         {/* Top Header */}
         <header className="h-14 border-b border-border bg-card flex items-center justify-between px-6 flex-shrink-0">
           <div className="flex items-center gap-4">
+             {/* Breadcrumb: "EntityName / PageLabel" derived from current route. */}
              <div className="text-sm text-muted-foreground font-medium breadcrumbs">
                 {currentEntityObj?.name || '...'} <span className="mx-2">/</span> {navItems.find(i => location === i.href || (i.href !== '/' && location.startsWith(i.href)))?.label || 'Page'}
              </div>
           </div>
           <div className="flex items-center gap-4">
+            {/* Global search input — currently a UI-only stub. */}
             <div className="relative">
               <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
               <input
@@ -189,7 +254,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
           </div>
         </header>
 
-        {/* Page Content */}
+        {/* Page Content: scrollable region that renders the active route. */}
         <div className="flex-1 overflow-auto bg-background p-6">
           <div className="mx-auto w-full max-w-7xl">
             {children}
