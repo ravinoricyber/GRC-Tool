@@ -26,7 +26,7 @@
  */
 
 import { Router, type IRouter } from "express";
-import { eq, and, SQL, arrayContains } from "drizzle-orm";
+import { eq, and, SQL, arrayContains, inArray } from "drizzle-orm";
 import { db, policiesTable } from "@workspace/db";
 import { serializeDates } from "../lib/serialize";
 import {
@@ -37,6 +37,56 @@ import {
   UpdatePolicyBody,
   UpdatePolicyResponse,
 } from "@workspace/api-zod";
+
+// ---------------------------------------------------------------------------
+// Bulk-operation validation helpers (no external dependency)
+// ---------------------------------------------------------------------------
+
+/** UUID v4 regex used to validate IDs in the bulk-delete payload. */
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+/**
+ * Shape expected for each item in the bulk-import request body.
+ * Required: code, name, owner, version. All others are optional.
+ */
+interface BulkImportItem {
+  code:          string;
+  name:          string;
+  owner:         string;
+  version:       string;
+  status?:       string;
+  effectiveDate?: string | null;
+  reviewDate?:   string | null;
+  pages?:        number | null;
+  frameworks?:   string[];
+  entities?:     string[];
+  description?:  string | null;
+}
+
+/**
+ * Validates a single item from the bulk-import body.
+ * Returns an error message string on failure, or `null` when the item is valid.
+ *
+ * @param item  - Untrusted object from the request body.
+ * @param index - Zero-based position in the input array (for error messages).
+ * @returns     `null` when valid, or a descriptive error string.
+ */
+function validateImportItem(item: unknown, index: number): string | null {
+  if (!item || typeof item !== "object") return `Item at index ${index} is not an object`;
+  const rec = item as Record<string, unknown>;
+  for (const field of ["code", "name", "owner", "version"] as const) {
+    if (typeof rec[field] !== "string" || !(rec[field] as string).trim()) {
+      return `Item at index ${index} is missing required string field "${field}"`;
+    }
+  }
+  if (rec.frameworks !== undefined && !Array.isArray(rec.frameworks)) {
+    return `Item at index ${index}: "frameworks" must be an array of strings`;
+  }
+  if (rec.entities !== undefined && !Array.isArray(rec.entities)) {
+    return `Item at index ${index}: "entities" must be an array of strings`;
+  }
+  return null;
+}
 
 /**
  * Express sub-router that owns all `/policies` routes.
@@ -217,6 +267,122 @@ router.delete("/policies/:id", async (req, res): Promise<void> => {
   const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
   await db.delete(policiesTable).where(eq(policiesTable.id, id));
   res.status(204).send();
+});
+
+/**
+ * POST /policies/bulk-import
+ *
+ * Inserts multiple policy records in a single database round-trip. The server
+ * assigns a UUID to each row; callers must not supply `id` values.
+ *
+ * Request body: `{ policies: BulkImportPolicyItem[] }` — array of 1–N policy
+ * objects, each requiring `code`, `name`, `owner`, and `version`.
+ *
+ * Behaviour on validation failure:
+ * - Zod validation runs before any database writes. If the body is invalid the
+ *   entire request is rejected with HTTP 400 and no rows are inserted.
+ * - Duplicate `code` values in the payload or conflicts with existing rows will
+ *   surface as a database constraint error (HTTP 500). The caller should dedupe
+ *   codes before submitting.
+ *
+ * @param req      - Express `Request`.
+ * @param req.body - JSON payload conforming to `BulkImportBody`:
+ *   `{ policies: Array<{ code, name, owner, version, status?, frameworks?,
+ *      entities?, effectiveDate?, reviewDate?, pages?, description? }> }`.
+ * @param res - Express `Response`.
+ *
+ * @returns {Promise<void>}
+ *   - HTTP 201 with `{ inserted: number, ids: string[] }` on success.
+ *   - HTTP 400 with `{ error: string }` when Zod validation fails.
+ *
+ * @throws Propagates unhandled database errors (e.g. unique-constraint
+ *   violation on `code`) as uncaught rejections.
+ */
+router.post("/policies/bulk-import", async (req, res): Promise<void> => {
+  const body = req.body as Record<string, unknown>;
+
+  // Top-level shape check: must have a non-empty `policies` array.
+  if (!Array.isArray(body?.policies) || body.policies.length === 0) {
+    res.status(400).json({ error: '"policies" must be a non-empty array' });
+    return;
+  }
+
+  // Validate each item. Fail fast on the first invalid record.
+  for (let i = 0; i < body.policies.length; i++) {
+    const err = validateImportItem(body.policies[i], i);
+    if (err) { res.status(400).json({ error: err }); return; }
+  }
+
+  const items = body.policies as BulkImportItem[];
+
+  // Attach a server-generated UUID to every incoming item before insertion.
+  const rows = items.map(p => ({
+    id:            crypto.randomUUID(),
+    code:          p.code,
+    name:          p.name,
+    owner:         p.owner,
+    version:       p.version,
+    status:        p.status ?? "current",
+    effectiveDate: p.effectiveDate ?? null,
+    reviewDate:    p.reviewDate ?? null,
+    pages:         p.pages ?? null,
+    frameworks:    Array.isArray(p.frameworks) ? p.frameworks : [],
+    entities:      Array.isArray(p.entities)   ? p.entities   : [],
+    description:   p.description ?? null,
+  }));
+
+  const inserted = await db.insert(policiesTable).values(rows).returning({ id: policiesTable.id });
+  res.status(201).json({ inserted: inserted.length, ids: inserted.map(r => r.id) });
+});
+
+/**
+ * DELETE /policies/bulk
+ *
+ * Permanently removes multiple policy records in a single database round-trip.
+ * The operation is idempotent: IDs that do not match any row are silently
+ * ignored; the response reflects only rows that were actually deleted.
+ *
+ * Callers should verify that none of the targeted policies are actively
+ * referenced by framework mappings, control evidence, or assessments before
+ * issuing this request to avoid orphaned references in related resources.
+ *
+ * Request body: `{ ids: string[] }` — array of 1–N UUID strings.
+ *
+ * @param req      - Express `Request`.
+ * @param req.body - JSON payload conforming to `BulkDeleteBody`:
+ *   `{ ids: string[] }` — each value must be a valid UUID.
+ * @param res - Express `Response`.
+ *
+ * @returns {Promise<void>}
+ *   - HTTP 200 with `{ deleted: number }` on success.
+ *   - HTTP 400 with `{ error: string }` when Zod validation fails (e.g. empty
+ *     array, or a non-UUID string in the array).
+ *
+ * @throws Propagates unhandled database errors as uncaught rejections.
+ */
+router.delete("/policies/bulk", async (req, res): Promise<void> => {
+  const body = req.body as Record<string, unknown>;
+
+  // Must supply a non-empty array of UUID strings.
+  if (!Array.isArray(body?.ids) || body.ids.length === 0) {
+    res.status(400).json({ error: '"ids" must be a non-empty array of UUID strings' });
+    return;
+  }
+
+  // Validate each entry is a UUID-shaped string.
+  for (const id of body.ids as unknown[]) {
+    if (typeof id !== "string" || !UUID_RE.test(id)) {
+      res.status(400).json({ error: `Invalid UUID: ${String(id)}` });
+      return;
+    }
+  }
+
+  const deleted = await db
+    .delete(policiesTable)
+    .where(inArray(policiesTable.id, body.ids as string[]))
+    .returning({ id: policiesTable.id });
+
+  res.json({ deleted: deleted.length });
 });
 
 export default router;
