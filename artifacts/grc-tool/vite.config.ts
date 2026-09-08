@@ -72,6 +72,20 @@ export default defineConfig({
     fs: {
       strict: true,
     },
+    // In hosted Replit deployments the platform router forwards `/api` to the
+    // API server, so requests never reach Vite. For standalone local/dev use
+    // (e.g. Cloud Agent environments) there is no such router, so proxy `/api`
+    // to the API server here. Dev-only: does not affect `build` or `preview`.
+    ...(process.env.API_PROXY_TARGET
+      ? {
+          proxy: {
+            '/api': {
+              target: process.env.API_PROXY_TARGET,
+              changeOrigin: true,
+            },
+          },
+        }
+      : {}),
   },
   preview: {
     port,
